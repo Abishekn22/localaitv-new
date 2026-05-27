@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Global styles, keyframes, and animation helpers ──────────
+   Migrated from the legacy single-file App.jsx where these lived
+   in a `<style>{globalCSS}</style>` block. Fonts are now loaded
+   via index.html <link>, so the @import below is intentionally
+   commented out — keep it as a fallback reference. */
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes soundBar1 { from{height:4px} to{height:14px} }
+@keyframes soundBar2 { from{height:8px} to{height:18px} }
+@keyframes soundBar3 { from{height:5px} to{height:12px} }
+@keyframes soundbar1 { 0%{height:4px} 100%{height:14px} }
+@keyframes soundbar2 { 0%{height:14px} 100%{height:6px} }
+@keyframes soundbar3 { 0%{height:8px} 100%{height:12px} }
+@keyframes slideshowProgress {
+  0%   { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+@keyframes slideInUp    { from{transform:translateY(100%);opacity:0.6} to{transform:translateY(0);opacity:1} }
+@keyframes slideOutUp   { from{transform:translateY(0);opacity:1}    to{transform:translateY(-100%);opacity:0.4} }
+@keyframes slideOutDown { from{transform:translateY(0);opacity:1}    to{transform:translateY(100%);opacity:0.4} }
+@keyframes tickerScroll { 0%{transform:translateX(100%)} 100%{transform:translateX(-100%)} }
+@keyframes heartPop { 0%{opacity:0;transform:translate(-50%,-50%) scale(0.5)} 30%{opacity:1;transform:translate(-50%,-50%) scale(1.4)} 70%{opacity:1;transform:translate(-50%,-50%) scale(1.2)} 100%{opacity:0;transform:translate(-50%,-50%) scale(1)} }
+html,body,#root { width:100%; height:100%; background:var(--app-bg,#060D1F); font-family:'Barlow',sans-serif; color:var(--app-text,#fff); overflow:hidden; }
+::-webkit-scrollbar { display:none; }
+input,textarea,select,button { font-family:'Barlow',sans-serif; outline:none; border:none; }
+
+@keyframes blink    { 0%,100%{opacity:1} 50%{opacity:0.3} }
+@keyframes ticker   { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+@keyframes pulse    { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.05);opacity:0.8} }
+@keyframes fadeIn   { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+@keyframes slideInRight { from{transform:translateX(100%);opacity:0.4} to{transform:translateX(0);opacity:1} }
+@keyframes screenIn { from{opacity:0;transform:translateX(18px)} to{opacity:1;transform:translateX(0)} }
+@keyframes slideUp  { from{transform:translateY(100%)} to{transform:translateY(0)} }
+@keyframes spin     { to{transform:rotate(360deg)} }
+@keyframes shimmer  { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+/* News upload — validation error shake + success ring pulse */
+@keyframes shake         { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 50%{transform:translateX(4px)} 75%{transform:translateX(-2px)} }
+@keyframes pulseSuccess  { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.08);opacity:1} 100%{transform:scale(1);opacity:1} }
+
+@keyframes scrollBanner { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+.fade-in   { animation: fadeIn   0.25s ease forwards; }
+.screen-in { animation: screenIn 0.22s cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+.slide-up  { animation: slideUp  0.4s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
+/* Input placeholder colors — light readable grey */
+input::placeholder, textarea::placeholder {
+  color: #999;
+  opacity: 1;
+}
+
+/* Select styling — remove default arrow on some browsers */
+select { -webkit-appearance: none; appearance: none; }
+
+/* Smooth tap feedback on cards */
+.tap-card { transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.tap-card:active { transform: scale(0.98); }
+
+/* ════════════════════════════════════════════════════════════
+   OTT PHASE-2 — MOTION + INTERACTION FOUNDATION
+   Premium press feedback, section reveals, screen transitions.
+   Utilities — components opt in via className.
+   ════════════════════════════════════════════════════════════ */
+
+/* Premium press feedback for cards / pills / buttons.
+   Subtle lift on hover, soft scale-down on press. */
+.ott-press {
+  transition:
+    transform 0.22s cubic-bezier(0.22,1,0.36,1),
+    box-shadow 0.22s cubic-bezier(0.22,1,0.36,1),
+    filter 0.22s cubic-bezier(0.22,1,0.36,1);
+  will-change: transform;
+}
+@media (hover:hover) {
+  .ott-press:hover { transform: translateY(-1px); filter: brightness(1.04); }
+}
+.ott-press:active { transform: scale(0.97); filter: brightness(0.97); transition-duration: 0.10s; }
+
+/* Stronger lift variant — for hero cards and rail items */
+.ott-press-strong {
+  transition:
+    transform 0.28s cubic-bezier(0.22,1,0.36,1),
+    box-shadow 0.28s cubic-bezier(0.22,1,0.36,1);
+  will-change: transform;
+}
+@media (hover:hover) {
+  .ott-press-strong:hover { transform: translateY(-2px); }
+}
+.ott-press-strong:active { transform: translateY(0) scale(0.985); transition-duration: 0.10s; }
+
+/* Section reveal — fades and rises into view on first paint.
+   Hook (useReveal) toggles the is-in modifier once via IntersectionObserver. */
+@keyframes ottReveal {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ott-reveal { opacity: 0; }
+.ott-reveal.is-in { animation: ottReveal 0.48s cubic-bezier(0.22,1,0.36,1) forwards; }
+
+/* Screen-level fade on mount — soft cinematic entry */
+@keyframes ottScreenIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ott-screen-in { animation: ottScreenIn 0.32s cubic-bezier(0.22,1,0.36,1) both; }
+
+/* Floating bottom-nav active indicator pulse — slides between tabs.
+   Pure CSS — the inline indicator's left value is animated by the
+   transition rule on .ott-nav-indicator, not by JS. */
+.ott-nav-indicator {
+  transition:
+    left 0.34s cubic-bezier(0.22,1,0.36,1),
+    width 0.34s cubic-bezier(0.22,1,0.36,1),
+    opacity 0.22s ease;
+}
+
+/* Tab item press — different curve (snappier) so it feels distinct from cards */
+.ott-tab { transition: transform 0.16s ease, opacity 0.16s ease; }
+.ott-tab:active { transform: scale(0.92); }
+
+/* Reduced motion — honour user preference */
+@media (prefers-reduced-motion: reduce) {
+  .ott-press, .ott-press-strong, .ott-tab,
+  .ott-reveal, .ott-reveal.is-in,
+  .ott-screen-in, .ott-nav-indicator,
+  .ott-halo, .ott-halo2, .ott-ai-pulse, .ott-ai-scan,
+  .ott-kenburns, .ott-featured-shine {
+    animation: none !important;
+    transition: none !important;
+  }
+  .ott-reveal { opacity: 1 !important; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   OTT PHASE-3 — SIGNATURE CINEMATIC HERO
+   The live TV player becomes the broadcast hero, surrounded by
+   ambient red halo and an AI-curated identity ribbon. Sets the
+   "this is the future of regional TV" tone within 3 seconds.
+   ════════════════════════════════════════════════════════════ */
+
+/* Ambient halo — two desynchronized layers (prime-ish periods 4.2s vs
+   5.7s, so they never align) give the glow micro-organic timing variance.
+   Same range, no extra strength — just less mathematical uniformity. */
+@keyframes ottHalo {
+  0%,100% { opacity: 0.78; transform: scale(1); }
+  50%     { opacity: 1;    transform: scale(1.015); }
+}
+@keyframes ottHalo2 {
+  0%,100% { opacity: 0.55; transform: scale(1.005); }
+  50%     { opacity: 0.85; transform: scale(1.024); }
+}
+.ott-halo  { animation: ottHalo  4.2s ease-in-out infinite; }
+.ott-halo2 { animation: ottHalo2 5.7s ease-in-out infinite; animation-delay: -1.4s; }
+
+/* AI-curated dot — slow pulse, distinct from the LIVE blink.
+   Softer / slower so the eye reads it as "intelligent presence"
+   rather than "urgent". */
+@keyframes ottAiPulse {
+  0%,100% { opacity: 1;   transform: scale(1);    box-shadow: 0 0 0 0   rgba(225,29,72,0.55); }
+  50%     { opacity: 0.7; transform: scale(0.92); box-shadow: 0 0 0 6px rgba(225,29,72,0); }
+}
+.ott-ai-pulse { animation: ottAiPulse 2.4s ease-in-out infinite; }
+
+/* AI scan-line — extremely subtle horizontal sweep across the hero,
+   used inside the AI-curated identity ribbon. Suggests "AI is
+   actively analyzing" without being noisy. */
+@keyframes ottAiScan {
+  0%   { transform: translateX(-100%); opacity: 0; }
+  20%  { opacity: 0.55; }
+  80%  { opacity: 0.55; }
+  100% { transform: translateX(220%); opacity: 0; }
+}
+.ott-ai-scan { animation: ottAiScan 3.6s ease-in-out infinite; }
+
+/* ════════════════════════════════════════════════════════════
+   OTT PHASE-4 — FEATURED-STORY DRAMA
+   The first editorial element must emotionally overpower the
+   rest of the page. Cinematic hero card with Ken Burns zoom on
+   the background, subtle gold shine sweep, urgent eyebrow.
+   ════════════════════════════════════════════════════════════ */
+
+/* Ken Burns — extremely slow zoom-and-drift on the background image.
+   Gives the still photo the breathing presence of a movie poster
+   trailer rather than a static thumbnail. */
+@keyframes ottKenBurns {
+  0%   { transform: scale(1.00) translate(0%,    0%);   }
+  50%  { transform: scale(1.06) translate(-1.2%, -0.8%); }
+  100% { transform: scale(1.00) translate(0%,    0%);   }
+}
+.ott-kenburns { animation: ottKenBurns 16s ease-in-out infinite; }
+
+/* Featured shine — a single rare gold sweep across the hero, slow
+   and infrequent. Suggests "this story is highlighted" without
+   constant motion noise. */
+@keyframes ottFeaturedShine {
+  0%, 78%, 100% { transform: translateX(-120%); opacity: 0; }
+  82%           { opacity: 0.35; }
+  96%           { transform: translateX(220%); opacity: 0; }
+}
+.ott-featured-shine { animation: ottFeaturedShine 11s ease-in-out infinite; }
+
+/* Light mode body class (set by ThemeProvider) */
+body.theme-light { background: #F5F5F5; color: #111111; }
+body.theme-dark  { background: #060D1F; color: #FFFFFF; }
