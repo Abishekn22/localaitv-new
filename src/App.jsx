@@ -80,6 +80,7 @@ import ReportSheet     from './components/sheets/ReportSheet.jsx';
 import PermissionSheet from './components/sheets/PermissionSheet.jsx';
 import Toast           from './components/Toast.jsx';
 
+<<<<<<< Updated upstream
 // Lazy wrapper for the 'shortsfeed' route. Mounting this fires the
 // /api/incidents fetch; the fetch never runs when the user isn't on
 // the route. KurnoolShortsScreen now handles an empty feed with a
@@ -96,6 +97,9 @@ function ShortsFeedRoute({ onClose }) {
   );
   return <KurnoolShortsScreen rawItems={items} initialIdx={0} onClose={onClose} />;
 }
+=======
+import { AuthProvider } from './contexts/AuthContext.jsx';
+>>>>>>> Stashed changes
 
 function App() {
   // ── Read current theme (set by ThemeProvider in AppRoot) ────
@@ -505,7 +509,9 @@ function App() {
 function AppRoot() {
   return (
     <ThemeProvider>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

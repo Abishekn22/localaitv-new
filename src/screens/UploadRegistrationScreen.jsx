@@ -3,9 +3,11 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import BottomNav from './../components/BottomNav.jsx';
 import { LocationPin } from './../components/atoms.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, userState, onSubmitDone }) {
   const { T } = useAppTheme();
+  const { setSession } = useAuth();
 
   const [state, setState] = useState(userState || '');
   const [constituency, setConstituency] = useState(userConstituency || '');
@@ -214,6 +216,8 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
       setSubmitMsg(reg.message || 'Registration failed.');
       return;
     }
+    // Persist the new session so ProfileScreen + the rest of the app see the user.
+    setSession({ token: reg.token, user: reg.user });
     setSubmitMsg('');
     onSubmitDone({
       state, constituency, name, mobile, photo,
