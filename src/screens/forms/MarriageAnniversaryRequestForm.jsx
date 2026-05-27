@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css, genId, uploadPhotos } from '../../_imports.js';
 
 import { SuccessScreen, FormHeader, FCard, FLabel, FInput } from './../../components/Form/FormElements.jsx';
 
@@ -64,6 +64,24 @@ function MarriageAnniversaryRequestForm({ onBack }) {
     setLoading(true);
     const reqId = genId('ANN');
     try {
+      // Upload the couple's main photos.
+      const couplePhotoUrls = mainPhotos.length
+        ? await uploadPhotos(mainPhotos, reqId, 'anniversary') : [];
+
+      // Upload each wisher's photos individually so each wisher row in the
+      // backend keeps its own photo_uris list.
+      const wishersOut = [];
+      for (const w of wishers) {
+        const wisherUrls = w.photos.length
+          ? await uploadPhotos(w.photos, reqId, 'anniversary') : [];
+        wishersOut.push({
+          name: w.name,
+          relation: w.relation,
+          photo_count: w.photos.length,
+          photo_uris: wisherUrls,
+        });
+      }
+
       await fetch(`${API}/anniversary-requests`, {
         method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({
@@ -71,9 +89,10 @@ function MarriageAnniversaryRequestForm({ onBack }) {
           couple_name: coupleName,
           marriage_date: marriageDate,
           years_completed: years,
-          wishers: wishers.map(w => ({ name:w.name, relation:w.relation, photo_count:w.photos.length })),
+          wishers: wishersOut,
           scheduled_by_anniversary: true,
           status:'Pending Review',
+          photo_uris: couplePhotoUrls,
         }),
       });
       setSuccess(reqId);
