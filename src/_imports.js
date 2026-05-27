@@ -32,7 +32,7 @@ export {
   YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK,
   CHANNEL_VIDEO, LIVE_CHANNELS,
 } from './data/liveChannels.js';
-export { BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS } from './data/bulletins.js';
+export { BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, formatBulletinTime } from './data/bulletins.js';
 export { SHORT_NEWS } from './data/shorts.js';
 export {
   CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 import Logo from './../components/Logo.jsx';
@@ -7,10 +7,21 @@ import Logo from './../components/Logo.jsx';
 function BulletinPlayerScreen({ startIdx = 0, onClose }) {
   const { T } = useAppTheme();
 
+  // Pull bulletins from /api/bulletins and map to the legacy shape. Falls
+  // back to BULLETINS (currently empty) so the screen never reads undefined.
+  const { data: liveBulletins, loading: bulletinsLoading } = useAPI(
+    () => apiCall(`/bulletins?page=1&limit=50`).then(d => d.items || d),
+    BULLETINS,
+    []
+  );
+
   // Sort bulletins newest first
-  const sorted = useMemo(() => (
-    [...BULLETINS].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0))
-  ), []);
+  const sorted = useMemo(() => {
+    const src = Array.isArray(liveBulletins) && liveBulletins.length > 0
+      ? liveBulletins.map(mapBulletin).filter(Boolean)
+      : BULLETINS;
+    return [...src].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
+  }, [liveBulletins]);
 
   // Find the bulletin the user originally tapped (handed off via window)
   const taggedId = (typeof window !== 'undefined') ? window.__bulletinStartId : null;
@@ -29,6 +40,14 @@ function BulletinPlayerScreen({ startIdx = 0, onClose }) {
   const [disliked,   setDisliked]   = useState(false);
   const [likeCount,  setLikeCount]  = useState(() => Math.floor(Math.random()*420) + 24);
   const [showComment,setShowComment]= useState(false);
+  // The API fetch resolves after first render, so on mount `sorted` is empty
+  // and `activeId` is undefined. Once the data arrives, point activeId at the
+  // bulletin the user originally tapped (or the first one if no handoff).
+  useEffect(() => {
+    if (activeId) return;
+    const id = sorted[initialIdx]?.id;
+    if (id) setActiveId(id);
+  }, [sorted, initialIdx, activeId]);
   // Clear the window hand-off once we've consumed it
   useEffect(() => {
     if (typeof window !== 'undefined') { try { delete window.__bulletinStartId; } catch(e){} }
@@ -114,6 +133,13 @@ function BulletinPlayerScreen({ startIdx = 0, onClose }) {
       <div ref={scrollRef} style={{flex:1, overflowY:'auto', WebkitOverflowScrolling:'touch',
         background:T.isDark?'#050a14':'#F5F6F8',
         paddingBottom:24}}>
+        {!active && (
+          <div style={{padding:'48px 16px', textAlign:'center',
+            fontFamily:"'Barlow Condensed',sans-serif", fontSize:13, letterSpacing:0.5,
+            color:T.textMuted}}>
+            {bulletinsLoading ? 'Loading bulletins…' : 'No bulletins available yet.'}
+          </div>
+        )}
         {/* Sticky active player — pins at top of scroll container, NO extra paddingTop on the list */}
         {active && (
           <div style={{
@@ -122,14 +148,33 @@ function BulletinPlayerScreen({ startIdx = 0, onClose }) {
             boxShadow:'0 4px 14px rgba(0,0,0,0.18)',
           }}>
             <div style={{position:'relative', paddingBottom:'56.25%', height:0, background:'#000'}}>
-              <iframe
-                key={active.id}
-                style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', border:'none'}}
-                src={`https://www.youtube.com/embed/${active.ytId}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-                title={active.titleEn || active.titleTe}
-              />
+              {active.ytId ? (
+                <iframe
+                  key={active.id}
+                  style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', border:'none'}}
+                  src={`https://www.youtube.com/embed/${active.ytId}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  title={active.titleEn || active.titleTe}
+                />
+              ) : active.videoUrl ? (
+                <video
+                  key={active.id}
+                  src={active.videoUrl}
+                  poster={active.thumbnail || undefined}
+                  controls
+                  autoPlay
+                  playsInline
+                  style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', background:'#000', objectFit:'contain'}}
+                />
+              ) : (
+                <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, color:'rgba(255,255,255,0.55)'}}>
+                  <div style={{fontSize:36}}>📺</div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif", fontSize:12, letterSpacing:1}}>
+                    {bulletinsLoading ? 'Loading bulletin…' : 'No video available'}
+                  </div>
+                </div>
+              )}
               {/* LocalAI TV watermark */}
               <div style={{position:'absolute', top:10, right:10, zIndex:6,
                 background:'rgba(0,0,0,0.55)', borderRadius:5, padding:'2px 6px',
@@ -330,10 +375,13 @@ function BulletinPlayerScreen({ startIdx = 0, onClose }) {
               {/* Full-width 16:9 thumbnail — matches the sticky player layout above */}
               <div style={{width:'100%', position:'relative', paddingBottom:'56.25%', height:0, background:'#000'}}>
                 <img
-                  src={`https://img.youtube.com/vi/${b.ytId}/maxresdefault.jpg`}
+                  src={b.ytId ? `https://img.youtube.com/vi/${b.ytId}/maxresdefault.jpg` : (b.thumbnail || '')}
                   alt={b.titleEn||b.titleTe}
                   style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', objectFit:'cover', display:'block'}}
-                  onError={e=>{ e.target.src = `https://img.youtube.com/vi/${b.ytId}/hqdefault.jpg`; }}
+                  onError={e=>{
+                    if (b.ytId) { e.target.src = `https://img.youtube.com/vi/${b.ytId}/hqdefault.jpg`; }
+                    else { e.target.style.display = 'none'; }
+                  }}
                 />
                 {/* Center play-button overlay */}
                 <div style={{position:'absolute', inset:0, display:'flex',
@@ -462,7 +510,9 @@ function BulletinPlayerScreen({ startIdx = 0, onClose }) {
           ═══════════════════════════════════════════════════════════ */}
       {showShare && active && (() => {
         const enc      = encodeURIComponent;
-        const videoUrl = `https://www.youtube.com/watch?v=${active.ytId}`;
+        const videoUrl = active.ytId
+          ? `https://www.youtube.com/watch?v=${active.ytId}`
+          : (active.videoUrl || '');
         const titleTe  = active.titleTe || '';
         const titleEn  = active.titleEn || '';
         const subject  = titleEn || titleTe || 'LocalAI TV bulletin';

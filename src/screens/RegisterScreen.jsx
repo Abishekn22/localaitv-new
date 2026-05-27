@@ -16,6 +16,9 @@ function RegisterScreen({ onDone, onComplete }) {
   const [search, setSearch]       = useState('');
   const [loading, setLoading]     = useState(false);
   const [toast, setToast]         = useState('');
+  const [phoneChecking, setPhoneChecking] = useState(false);
+  const [phoneMsg, setPhoneMsg]         = useState('');
+  const [phoneMsgType, setPhoneMsgType] = useState('');
   const list = state==='AP' ? AP_CONSTITUENCIES : TG_CONSTITUENCIES;
   // Filter matches both Telugu and English; live constituencies are first in the array
   const filtered = list.filter(c => c.en.toLowerCase().includes(search.toLowerCase()) || c.te.includes(search));
@@ -24,10 +27,71 @@ function RegisterScreen({ onDone, onComplete }) {
   const otherItems = [...filtered].sort((a,b) => a.en.localeCompare(b.en)); // ALL, A-Z incl. live
   const showSections = search.length === 0 && liveItems.length > 0;
   function showToast(m){ setToast(m); setTimeout(()=>setToast(''),2500); }
-  function sendOtp(){
+  const checkPhoneApi = async (phoneNumber) => {
+    if (!phoneNumber || !/^[6-9]\d{9}$/.test(phoneNumber)) {
+      return { isAvailable: false, message: 'Please enter a valid 10-digit Indian phone number' };
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/check-phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber.trim() }),
+        credentials: 'include'
+      });
+      let responseData;
+      try {
+        responseData = await response.json();
+      } catch (parseErr) {
+        const responseText = await response.text();
+        return { isAvailable: false, message: 'Unable to validate phone number. Please try again.', error: 'Invalid server response format' };
+      }
+      const phoneExists = response.ok && responseData && responseData.registered === true;
+      if (phoneExists) {
+        return { isAvailable: false, message: 'This phone number is already registered. Please sign in to your existing account or use a different number.' };
+      }
+      return { isAvailable: true, message: 'Phone number is available for registration' };
+    } catch (networkError) {
+      return { isAvailable: false, message: 'Network error while checking phone number. Please check your connection and try again.', error: networkError.message };
+    }
+  };
+
+  useEffect(() => {
+    if (!phone || !/^[6-9]\d{9}$/.test(phone)) {
+      setPhoneMsg('');
+      setPhoneMsgType('');
+      return;
+    }
+    setPhoneMsg('Checking…');
+    setPhoneMsgType('checking');
+    setPhoneChecking(true);
+    const timer = setTimeout(async () => {
+      const result = await checkPhoneApi(phone);
+      setPhoneChecking(false);
+      setPhoneMsg(result.message);
+      if (result.isAvailable) {
+        setPhoneMsgType('available');
+      } else if (result.message.includes('already registered')) {
+        setPhoneMsgType('taken');
+      } else {
+        setPhoneMsgType('error');
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [phone]);
+
+  async function sendOtp(){
     if(phone.length<10){ showToast('Enter valid 10-digit number'); return; }
     setLoading(true);
-    setTimeout(()=>{ setLoading(false); setOtpSent(true); showToast('OTP sent to +91 '+phone); },1200);
+    const result = await checkPhoneApi(phone);
+    if (!result.isAvailable) {
+      setLoading(false);
+      setPhoneMsg(result.message);
+      setPhoneMsgType(result.message.includes('already registered') ? 'taken' : 'error');
+      return;
+    }
+    setLoading(false);
+    setOtpSent(true);
+    showToast('OTP sent to +91 '+phone);
   }
   function verifyOtp(){
     if(otp.length<4){ showToast('Enter OTP'); return; }
@@ -85,9 +149,12 @@ function RegisterScreen({ onDone, onComplete }) {
                   placeholder="Enter 10-digit number" type="tel" maxLength={10}
                   style={{flex:1,background:T.bg3,borderRadius:10,padding:'12px',fontSize:14,color:T.text,border:`1px solid ${T.border}`,boxShadow:T.isDark?'none':`0 2px 8px ${T.shadow}`}}/>
               </div>
+              {phoneMsg && (
+                <div style={{fontSize:11,color:phoneMsgType==='available'?T.green:phoneMsgType==='checking'?T.textMuted:T.red,background:phoneMsgType==='available'?'rgba(0,200,90,0.1)':phoneMsgType==='checking'?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:8,padding:'8px 12px',border:`1px solid ${phoneMsgType==='available'?'rgba(0,200,90,0.3)':phoneMsgType==='checking'?'rgba(255,255,255,0.1)':T.red+'33'}`}}>{phoneMsg}</div>
+              )}
             </div>
             {!otpSent?(
-              <button onClick={sendOtp} disabled={loading} style={{background:loading?T.gray3:`linear-gradient(135deg,${T.red},#9A0015)`,color:T.text,borderRadius:12,padding:'14px',fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,letterSpacing:2,cursor:'pointer',boxShadow:loading?'none':`0 6px 20px ${T.red}44`}}>
+              <button onClick={sendOtp} disabled={loading || phoneChecking || !phone || phone.length !== 10 || phoneMsgType === 'taken'} style={{background:(loading||phoneChecking||!phone||phone.length!==10||phoneMsgType==='taken')?T.gray3:`linear-gradient(135deg,${T.red},#9A0015)`,color:T.text,borderRadius:12,padding:'14px',fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,letterSpacing:2,cursor:(loading||phoneChecking||!phone||phone.length!==10||phoneMsgType==='taken')?'not-allowed':'pointer',opacity:(loading||phoneChecking||!phone||phone.length!==10||phoneMsgType==='taken')?0.6:1,boxShadow:(loading||phoneChecking||!phone||phone.length!==10||phoneMsgType==='taken')?'none':`0 6px 20px ${T.red}44`}}>
                 {loading?'SENDING…':'SEND OTP'}
               </button>
             ):(
