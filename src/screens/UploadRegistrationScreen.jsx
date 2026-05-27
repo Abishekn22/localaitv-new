@@ -21,13 +21,23 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
   const [phoneChecking, setPhoneChecking] = useState(false);
   const [phoneMsg, setPhoneMsg] = useState('');
   const [phoneMsgType, setPhoneMsgType] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpMsg, setOtpMsg] = useState('');
+  const [otpMsgType, setOtpMsgType] = useState('');
+  const [uploadedPhotoPath, setUploadedPhotoPath] = useState(userProfile?.profile_photo || '');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState('');
+
+  // Static KYC video path — KYC video step is skipped per spec
+  const STATIC_KYC_VIDEO_PATH = '/uploads/kyc/static-kyc-video.mp4';
 
   const checkPhoneApi = async (phoneNumber) => {
     if (!phoneNumber || !/^[6-9]\d{9}$/.test(phoneNumber)) {
       return { isAvailable: false, message: 'Please enter a valid 10-digit Indian phone number' };
     }
     try {
-      const response = await fetch(`${API_BASE}/api/auth/check-phone`, {
+      const response = await fetch(`${API_BASE}/auth/check-phone`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ phone: phoneNumber.trim() }),
@@ -47,6 +57,59 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
       return { isAvailable: true, message: 'Phone number is available for registration' };
     } catch (networkError) {
       return { isAvailable: false, message: 'Network error while checking phone number. Please check your connection and try again.', error: networkError.message };
+    }
+  };
+
+  const sendOtpApi = async (phoneNumber, otp) => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/send-otp-proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber.trim(), otp }),
+        credentials: 'include',
+      });
+      if (!response.ok) return { ok: false, message: `Failed to send OTP (${response.status})` };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: 'Network error while sending OTP. Please try again.' };
+    }
+  };
+
+  const uploadPhotoApi = async (file) => {
+    try {
+      const fd = new FormData();
+      fd.append('photo', file);
+      fd.append('purpose', 'registration');
+      const response = await fetch(`${API_BASE}/kyc/upload-photo`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data && data.success && data.data && data.data.path) {
+        return { ok: true, path: data.data.path, url: data.data.url || '' };
+      }
+      return { ok: false, message: (data && data.message) || 'Photo upload failed' };
+    } catch (e) {
+      return { ok: false, message: 'Network error while uploading photo.' };
+    }
+  };
+
+  const registerApi = async (payload) => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data && data.token) {
+        return { ok: true, token: data.token, user: data.user };
+      }
+      return { ok: false, message: (data && data.message) || 'Registration failed' };
+    } catch (e) {
+      return { ok: false, message: 'Network error during registration.' };
     }
   };
 
@@ -81,15 +144,83 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
     : state === 'TG' ? TG_CONSTITUENCIES
     : [];
 
-  function handleRequestOTP() {
-    // API skipped — testing only
-    setOtpRequested(true);
-    alert('OTP request simulated (testing mode — backend not wired).\n\nEnter any value or skip the OTP field — Submit will still work.');
+  async function handleRequestOTP() {
+    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+      setOtpMsg('Enter a valid 10-digit mobile number first.');
+      setOtpMsgType('error');
+      return;
+    }
+    if (phoneMsgType === 'taken') {
+      setOtpMsg('This number is already registered.');
+      setOtpMsgType('error');
+      return;
+    }
+    const newOtp = String(Math.floor(1000 + Math.random() * 9000));
+    setOtpSending(true);
+    setOtpMsg('Sending OTP…');
+    setOtpMsgType('checking');
+    const result = await sendOtpApi(mobile, newOtp);
+    setOtpSending(false);
+    if (result.ok) {
+      setGeneratedOtp(newOtp);
+      setOtpRequested(true);
+      setOtpMsg(`OTP sent to +91 ${mobile}.`);
+      setOtpMsgType('available');
+    } else {
+      setOtpMsg(result.message || 'Failed to send OTP.');
+      setOtpMsgType('error');
+    }
   }
 
-  function handleSubmit() {
-    // All fields optional — always proceed
-    onSubmitDone({ state, constituency, name, mobile, photo });
+  async function handleSubmit() {
+    if (submitting) return;
+    // OTP is optional; verify only if user entered one
+    if (otpRequested && otp && generatedOtp && otp !== generatedOtp) {
+      setSubmitMsg('OTP does not match. Please re-check or resend.');
+      return;
+    }
+    setSubmitting(true);
+    setSubmitMsg('');
+
+    // 1) Upload profile photo if a new file was selected
+    let profilePhotoPath = uploadedPhotoPath;
+    if (photo) {
+      setSubmitMsg('Uploading profile photo…');
+      const up = await uploadPhotoApi(photo);
+      if (!up.ok) {
+        setSubmitting(false);
+        setSubmitMsg(up.message || 'Photo upload failed.');
+        return;
+      }
+      profilePhotoPath = up.path;
+      setUploadedPhotoPath(up.path);
+    }
+
+    // 2) Register — resolve location_id to the numeric DB id from CHANNELS_AP/TG
+    //    (LIVE_CHANNELS only carries the dropdown's string code; the backend wants
+    //    the locations table id, which lives on the matching CHANNELS_AP/TG entry.)
+    const dbChannel = [...CHANNELS_AP, ...CHANNELS_TG].find(c => c.name === constituency);
+    setSubmitMsg('Submitting registration…');
+    const payload = {
+      name: (name || '').trim(),
+      phone: (mobile || '').trim(),
+      location_id: dbChannel ? dbChannel.id : null,
+      kyc_video: STATIC_KYC_VIDEO_PATH,
+      profile_photo: profilePhotoPath,
+    };
+    const reg = await registerApi(payload);
+    setSubmitting(false);
+    if (!reg.ok) {
+      setSubmitMsg(reg.message || 'Registration failed.');
+      return;
+    }
+    setSubmitMsg('');
+    onSubmitDone({
+      state, constituency, name, mobile, photo,
+      profile_photo: profilePhotoPath,
+      token: reg.token,
+      user: reg.user,
+    });
   }
 
   return (
@@ -487,16 +618,21 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
                   outline:'none',boxSizing:'border-box',letterSpacing:1,
                   opacity:otpRequested?1:0.6}}/>
               <button type="button" onClick={handleRequestOTP}
+                disabled={otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken'}
                 style={{
-                  background:'linear-gradient(135deg,#E8001E,#B0001A)',
+                  background:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?'#888':'linear-gradient(135deg,#E8001E,#B0001A)',
                   border:'none',borderRadius:10,padding:'10px 14px',
                   color:'white',fontSize:12,fontWeight:800,letterSpacing:0.5,
-                  cursor:'pointer',whiteSpace:'nowrap',
-                  boxShadow:'0 2px 8px rgba(208,2,27,0.3)',
+                  cursor:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?'not-allowed':'pointer',whiteSpace:'nowrap',
+                  opacity:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?0.6:1,
+                  boxShadow:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?'none':'0 2px 8px rgba(208,2,27,0.3)',
                 }}>
-                {otpRequested?'Resend':'Request OTP'}
+                {otpSending?'Sending…':otpRequested?'Resend':'Request OTP'}
               </button>
             </div>
+            {otpMsg && (
+              <div style={{fontSize:11,color:otpMsgType==='available'?'#00C85A':otpMsgType==='checking'?T.textMuted:'#D0021B',background:otpMsgType==='available'?'rgba(0,200,90,0.1)':otpMsgType==='checking'?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:8,padding:'8px 12px',border:`1px solid ${otpMsgType==='available'?'rgba(0,200,90,0.3)':otpMsgType==='checking'?'rgba(255,255,255,0.1)':'rgba(208,2,27,0.33)'}`,marginTop:6}}>{otpMsg}</div>
+            )}
           </div>
         </div>
 
@@ -509,17 +645,22 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
           ℹ️ All fields are optional for testing. Tap <b>Submit</b> below to continue to the upload page.
         </div>
 
+        {/* Submit status / error */}
+        {submitMsg && (
+          <div style={{fontSize:12,color:submitting?T.textMuted:'#D0021B',background:submitting?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:10,padding:'10px 14px',border:`1px solid ${submitting?'rgba(255,255,255,0.1)':'rgba(208,2,27,0.33)'}`,marginBottom:10}}>{submitMsg}</div>
+        )}
+
         {/* Submit */}
-        <button onClick={handleSubmit} disabled={!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking}
+        <button onClick={handleSubmit} disabled={!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting}
           onMouseEnter={e=>{
-            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)) {
+            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)) {
               e.currentTarget.style.transform='translateY(-2px)';
               e.currentTarget.style.boxShadow='0 8px 22px rgba(208,2,27,0.55)';
               e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
             }
           }}
           onMouseLeave={e=>{
-            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)) {
+            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)) {
               e.currentTarget.style.transform='translateY(0)';
               e.currentTarget.style.boxShadow='0 4px 14px rgba(208,2,27,0.35)';
               e.currentTarget.style.background='linear-gradient(135deg,#E8001E,#B0001A)';
@@ -527,16 +668,16 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
           }}
           style={{
             width:'100%',
-            background:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?'#888':'linear-gradient(135deg,#E8001E,#B0001A)',
+            background:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?'#888':'linear-gradient(135deg,#E8001E,#B0001A)',
             color:'white',border:'none',borderRadius:12,padding:'14px',
-            cursor:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?'not-allowed':'pointer',
+            cursor:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?'not-allowed':'pointer',
             display:'flex',flexDirection:'column',alignItems:'center',gap:2,
-            opacity:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?0.6:1,
-            boxShadow:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?'none':'0 4px 14px rgba(208,2,27,0.35)',
+            opacity:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?0.6:1,
+            boxShadow:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?'none':'0 4px 14px rgba(208,2,27,0.35)',
             transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
           }}>
           <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:16,letterSpacing:0.5,lineHeight:1.2}}>
-            🚀 Submit and Go To Upload
+            {submitting ? 'Submitting…' : '🚀 Submit and Go To Upload'}
           </span>
           <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:0.8,opacity:0.95,lineHeight:1.2,marginTop:2}}>
             News / Information
