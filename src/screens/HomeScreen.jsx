@@ -3,6 +3,7 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import BottomNav from './../components/BottomNav.jsx';
 import ClassifiedsSection from './../components/Sections/ClassifiedsSection.jsx';
+import DistrictNewsFeedScreen from './DistrictNewsFeedScreen.jsx';
 import FeaturedStoryHero from './../components/Sections/FeaturedStoryHero.jsx';
 import LiveActivityStrip from './../components/LiveActivityStrip.jsx';
 import LiveStrip from './../components/Sections/LiveStrip.jsx';
@@ -41,6 +42,9 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   const [showDropdown,  setShowDropdown]  = useState(false);
   const [feedViewer,    setFeedViewer]    = useState(null);  // {type,items,startIdx,title}
   const [selectedShort, setSelectedShort] = useState(null);  // legacy shorts compat
+  // Index into the sorted incidentShorts feed for the KurnoolShortsScreen overlay
+  // opened from a Top Stories rail tap. null = overlay closed.
+  const [topStoriesViewerIdx, setTopStoriesViewerIdx] = useState(null);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [bookmarks, setBookmarks] = useState(() => {
     try { return JSON.parse(localStorage.getItem('localaitv_bookmarks') || '[]'); }
@@ -139,6 +143,29 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     uploadedAt:  it?.created_at ? new Date(it.created_at) : new Date(),
   });
 
+  // Incident → news-shape projection used by both the Top Stories rail
+  // cards and the DistrictNewsFeedScreen viewer that opens on tap. The
+  // rail card reads id/title/cat/source/time/live/thumbnail; the viewer
+  // additionally reads mediaUrl (for the <video> player) and uploadedAt
+  // (for sort + date label). ytId/link stay null — incidents are S3
+  // videos, not YouTube embeds or external articles.
+  const mapIncidentToRailItem = (it) => ({
+    id:         it?.id,
+    title:      it?.title || '',
+    cat:        it?.category?.name || 'District',
+    source:     'LocalAI TV',
+    channel:    'LocalAI TV',
+    time:       it?.created_at
+      ? new Date(it.created_at).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })
+      : '',
+    live:       !!(it?.is_live),
+    link:       null,
+    ytId:       null,
+    thumbnail:  resolveMediaUrl(it?.cover_image_path || it?.thumbnail),
+    mediaUrl:   resolveMediaUrl(it?.video_path || it?.media_url),
+    uploadedAt: it?.created_at || null,
+  });
+
   const newsToShow     = (Array.isArray(liveNews)     && liveNews.length     > 0) ? liveNews     : NEWS_ITEMS;
   const bulletinsToShow= (Array.isArray(liveBulletins) && liveBulletins.length > 0)
     ? liveBulletins.map(mapBulletin)
@@ -175,7 +202,9 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     { id:'Health',    emoji:'🏥', te:'ఆరోగ్య వార్తలు'      },
     { id:'Sports',    emoji:'🏆', te:'క్రీడా వార్తలు'      },
   ];
-  // Show District news first; limit to 5 on home page
+  // Search box (currently dead UI — hidden by default; theme toggle replaced
+  // the search icon) still filters news for any future re-enable. Left intact
+  // because FeaturedStoryHero above continues to consume newsToShow.
   const searchLower = searchQuery.toLowerCase();
   const searched = searchQuery.trim()
     ? newsToShow.filter(n =>
@@ -183,17 +212,17 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         n.titleTe?.toLowerCase().includes(searchLower) ||
         n.titleEn?.toLowerCase().includes(searchLower))
     : newsToShow;
-  const filtered = cat === 'All' ? searched : searched.filter(n => n.cat === cat);
-  // Phase-5: skip the lead item from the rail when it's already showing as
-  // the FeaturedStoryHero above. Eliminates the perceived duplication and
-  // makes the rail feel like discovery, not repetition. featuredId is the
-  // hero's item id — independent of the rail's category filter, since the
-  // hero always uses newsToShow[0] regardless of cat selection.
-  const featuredId     = (newsToShow && newsToShow[0]) ? newsToShow[0].id : null;
-  const filteredHome   = useMemo(
-    () => filtered.filter(n => n.id !== featuredId).slice(0, 10),
-    [filtered, featuredId]
+  // Top Stories rail is sourced from /api/incidents (live citizen-reporter
+  // short videos), not /api/news. Category pills below the header are kept
+  // as UI only — setCat still fires but no filtering is applied, since
+  // incidents don't currently carry the news category taxonomy. When the
+  // backend starts returning category-tagged incidents, wire the filter back
+  // in here. Empty rail when the API returns nothing — no static fallback.
+  const incidentsRailItems = useMemo(
+    () => (Array.isArray(liveIncidents) ? liveIncidents.map(mapIncidentToRailItem) : []),
+    [liveIncidents]
   );
+  const filteredHome = useMemo(() => incidentsRailItems.slice(0, 10), [incidentsRailItems]);
 
   return (
     <div className="ott-screen-in"
@@ -1060,7 +1089,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                   open (Shorts / feed viewer / fullscreen bulletin-live). Removing it
                   hard-stops its audio — guaranteeing only ONE audio plays anywhere.
                   When that overlay closes, the iframe remounts and resumes. */}
-              {(!feedViewer && !selectedShort && !showLiveOverlay) && (
+              {(!feedViewer && !selectedShort && !showLiveOverlay && topStoriesViewerIdx === null) && (
               <iframe
                 key={activeChannel.id}
                 style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',border:'none'}}
@@ -1326,7 +1355,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                     }}>వార్తలు</span>
                   </div>
                 </div>
-                {newsLoading && (
+                {incidentsLoading && (
                   <span style={{fontSize:9,color:T.textMuted,fontStyle:'italic'}}>Refreshing…</span>
                 )}
               </div>
@@ -1388,12 +1417,18 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               const isGovt = ['PIB','MyGov','AP CMO','TG CMO'].includes(n.source) || ['PIB','MyGov','AP CMO','TG CMO'].includes(n.channel);
               const sourceName = n.source || n.channel || 'Unknown';
 
+              // Top Stories cards are incident-backed. Tap opens the
+              // DistrictNewsFeedScreen viewer (sticky-top video player +
+              // scrolling list + category bar — same UI as tapping the
+              // FeaturedStoryHero above). DistrictNewsFeedScreen sorts by
+              // uploadedAt desc internally; mirror that sort here so the
+              // start index lines up with the tapped incident.
               const handleClick = () => {
-                if (n.link && !isLocalAI) {
-                  window.open(n.link, '_blank', 'noreferrer');
-                } else {
-                  onOpenNews(n);
-                }
+                const sorted = [...incidentsRailItems].sort((a, b) =>
+                  new Date(b.uploadedAt || b.id * -1) - new Date(a.uploadedAt || a.id * -1)
+                );
+                const idx = sorted.findIndex(x => x.id === n.id);
+                setTopStoriesViewerIdx(idx >= 0 ? idx : 0);
               };
 
               // Shared image-src resolution — used by both LEAD and secondary cards.
@@ -1857,6 +1892,24 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── TOP STORIES → DISTRICT NEWS FEED VIEWER OVERLAY ─────────
+            Opened when the user taps any card in the District news rail.
+            Mirrors the UI that FeaturedStoryHero opens (sticky-top
+            player + scrolling list + bottom category bar) but populated
+            from the live /api/incidents feed via the items prop, with
+            category filtering disabled (pills remain as UI only). */}
+      {topStoriesViewerIdx !== null && (
+        <div style={{position:'fixed', inset:0, zIndex:200, background:T.bg}}>
+          <DistrictNewsFeedScreen
+            onClose={() => setTopStoriesViewerIdx(null)}
+            startCat="All"
+            startIdx={topStoriesViewerIdx}
+            items={incidentsRailItems}
+            disableCategoryFilter
+          />
         </div>
       )}
 

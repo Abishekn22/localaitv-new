@@ -6,8 +6,15 @@ import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 import Logo from './../components/Logo.jsx';
 import NewsShareSheet from './../components/Feed/NewsShareSheet.jsx';
 
-function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0 }) {
+function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0, items, disableCategoryFilter = false }) {
   const { T } = useAppTheme();
+
+  // Caller can inject a custom item list (e.g. live incidents from
+  // /api/incidents); falls back to the bundled NEWS_ITEMS otherwise.
+  // When disableCategoryFilter is true, the bottom pill bar still renders
+  // and tapping a pill still highlights it, but the visible list does
+  // NOT filter — useful for sources without a news taxonomy.
+  const sourceItems = items || NEWS_ITEMS;
 
   // ── State ─────────────────────────────────────────────────────
   const [activeCat,   setActiveCat]   = useState(startCat);
@@ -26,22 +33,31 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0 }) {
     return () => { document.body.style.overflow = ''; };
   }, []);
 
-  // Filter + sort newest first within the active category
+  // Filter + sort newest first within the active category. When
+  // disableCategoryFilter is true the activeCat input is ignored — all
+  // source items render regardless of pill selection.
   const filtered = useMemo(() => {
-    const items = activeCat === 'All'
-      ? NEWS_ITEMS
-      : NEWS_ITEMS.filter(n => n.cat === activeCat);
-    return [...items].sort((a, b) =>
+    const list = (disableCategoryFilter || activeCat === 'All')
+      ? sourceItems
+      : sourceItems.filter(n => n.cat === activeCat);
+    return [...list].sort((a, b) =>
       new Date(b.uploadedAt || b.id * -1) - new Date(a.uploadedAt || a.id * -1)
     );
-  }, [activeCat]);
+  }, [sourceItems, activeCat, disableCategoryFilter]);
 
-  // When category changes, set the active item — startIdx ⇒ that index, else first item
+  // When category changes, set the active item — startIdx ⇒ that index,
+  // else first item. Skip the reset when disableCategoryFilter is true and
+  // we already have an active item: pills should not bounce the player
+  // back to its initial position when category filtering is off.
   useEffect(() => {
     if (filtered.length === 0) { setActiveId(null); return; }
+    if (disableCategoryFilter && activeId) return;
     const want = (typeof startIdx === 'number' && startIdx < filtered.length) ? filtered[startIdx] : filtered[0];
     setActiveId(want.id);
-  }, [filtered, startIdx]);
+  // activeId intentionally omitted from deps — including it would cause
+  // the reset to fire every time we change activeId from inside the screen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, startIdx, disableCategoryFilter]);
 
   const active    = filtered.find(b => b.id === activeId) || filtered[0];
   const remaining = useMemo(() => filtered.filter(b => b.id !== (active && active.id)), [filtered, active]);
@@ -201,6 +217,19 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0 }) {
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                   title={active.titleEn || active.title}
+                />
+              ) : active.mediaUrl ? (
+                // Direct S3 / HLS video (incidents from /api/incidents).
+                // objectFit:contain so vertical clips letterbox cleanly
+                // inside the 16:9 frame instead of being cropped.
+                <video
+                  key={active.id}
+                  src={active.mediaUrl}
+                  poster={active.thumbnail || undefined}
+                  controls
+                  autoPlay
+                  playsInline
+                  style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%', objectFit:'contain', background:'#000' }}
                 />
               ) : (
                 <img
@@ -412,7 +441,7 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0 }) {
                     style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', objectFit:'cover', display:'block'}}
                     onError={e=>{e.target.style.display='none'; e.target.parentNode.style.background='#1a0010';}}
                   />
-                  {b.ytId && (
+                  {(b.ytId || b.mediaUrl) && (
                     <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none'}}>
                       <div style={{width:44, height:44, borderRadius:'50%',
                         background:'rgba(255,255,255,0.88)',
@@ -528,11 +557,11 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0 }) {
           WebkitOverflowScrolling:'touch',
           padding:'8px 10px 4px', gap:6,
         }}>
-          {NEWS_CATS.filter(cat => cat.id === 'All' || NEWS_ITEMS.some(n => n.cat === cat.id)).map(cat => {
+          {NEWS_CATS.filter(cat => disableCategoryFilter || cat.id === 'All' || sourceItems.some(n => n.cat === cat.id)).map(cat => {
             const isActive = activeCat === cat.id;
             const count = cat.id === 'All'
-              ? NEWS_ITEMS.length
-              : NEWS_ITEMS.filter(n => n.cat === cat.id).length;
+              ? sourceItems.length
+              : sourceItems.filter(n => n.cat === cat.id).length;
             return (
               <button
                 key={cat.id}
