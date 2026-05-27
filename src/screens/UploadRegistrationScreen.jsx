@@ -18,6 +18,61 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
   const [showChannelDropdown, setShowChannelDropdown] = useState(false);
   const [dropStep, setDropStep] = useState('state');   // 'state' | 'constituency' — same as home page
   const [dropState, setDropState] = useState(null);    // 'AP' | 'TG'
+  const [phoneChecking, setPhoneChecking] = useState(false);
+  const [phoneMsg, setPhoneMsg] = useState('');
+  const [phoneMsgType, setPhoneMsgType] = useState('');
+
+  const checkPhoneApi = async (phoneNumber) => {
+    if (!phoneNumber || !/^[6-9]\d{9}$/.test(phoneNumber)) {
+      return { isAvailable: false, message: 'Please enter a valid 10-digit Indian phone number' };
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/check-phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber.trim() }),
+        credentials: 'include'
+      });
+      let responseData;
+      try {
+        responseData = await response.json();
+      } catch (parseErr) {
+        const responseText = await response.text();
+        return { isAvailable: false, message: 'Unable to validate phone number. Please try again.', error: 'Invalid server response format' };
+      }
+      const phoneExists = response.ok && responseData && responseData.registered === true;
+      if (phoneExists) {
+        return { isAvailable: false, message: 'This phone number is already registered. Please sign in to your existing account or use a different number.' };
+      }
+      return { isAvailable: true, message: 'Phone number is available for registration' };
+    } catch (networkError) {
+      return { isAvailable: false, message: 'Network error while checking phone number. Please check your connection and try again.', error: networkError.message };
+    }
+  };
+
+  useEffect(() => {
+    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+      setPhoneMsg('');
+      setPhoneMsgType('');
+      return;
+    }
+    setPhoneMsg('Checking…');
+    setPhoneMsgType('checking');
+    setPhoneChecking(true);
+    const timer = setTimeout(async () => {
+      const result = await checkPhoneApi(mobile);
+      setPhoneChecking(false);
+      setPhoneMsg(result.message);
+      if (result.isAvailable) {
+        setPhoneMsgType('available');
+      } else if (result.message.includes('already registered')) {
+        setPhoneMsgType('taken');
+      } else {
+        setPhoneMsgType('error');
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [mobile]);
 
   // Find selected channel object from LIVE_CHANNELS (matches the home page exactly)
   const selectedChannel = LIVE_CHANNELS.find(ch => ch.nameEn === constituency);
@@ -316,11 +371,14 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
               <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:13,color:T.text}}>మొబైల్ నంబర్</div>
               <div style={{fontSize:11,color:T.textMuted}}>Mobile Number</div>
             </div>
-            <input value={mobile} onChange={e=>setMobile(e.target.value.replace(/[^\d]/g,''))}
+            <input value={mobile} onChange={e=>setMobile(e.target.value.replace(/[^\d]/g,'').slice(0,10))}
               placeholder="98765 43210" type="tel" maxLength={10}
               style={{width:'100%',border:`1.5px solid ${T.inputBorder}`,borderRadius:10,
                 padding:'12px 14px',fontSize:14,color:T.text,background:T.inputBg,
                 outline:'none',boxSizing:'border-box',letterSpacing:0.5}}/>
+            {phoneMsg && (
+              <div style={{fontSize:11,color:phoneMsgType==='available'?'#00C85A':phoneMsgType==='checking'?T.textMuted:'#D0021B',background:phoneMsgType==='available'?'rgba(0,200,90,0.1)':phoneMsgType==='checking'?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:8,padding:'8px 12px',border:`1px solid ${phoneMsgType==='available'?'rgba(0,200,90,0.3)':phoneMsgType==='checking'?'rgba(255,255,255,0.1)':'rgba(208,2,27,0.33)'}`,marginTop:6}}>{phoneMsg}</div>
+            )}
           </div>
 
           {/* Profile Photo — Photo + Library buttons */}
@@ -452,24 +510,29 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
         </div>
 
         {/* Submit */}
-        <button onClick={handleSubmit}
+        <button onClick={handleSubmit} disabled={!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking}
           onMouseEnter={e=>{
-            e.currentTarget.style.transform='translateY(-2px)';
-            e.currentTarget.style.boxShadow='0 8px 22px rgba(208,2,27,0.55)';
-            e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
+            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)) {
+              e.currentTarget.style.transform='translateY(-2px)';
+              e.currentTarget.style.boxShadow='0 8px 22px rgba(208,2,27,0.55)';
+              e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
+            }
           }}
           onMouseLeave={e=>{
-            e.currentTarget.style.transform='translateY(0)';
-            e.currentTarget.style.boxShadow='0 4px 14px rgba(208,2,27,0.35)';
-            e.currentTarget.style.background='linear-gradient(135deg,#E8001E,#B0001A)';
+            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)) {
+              e.currentTarget.style.transform='translateY(0)';
+              e.currentTarget.style.boxShadow='0 4px 14px rgba(208,2,27,0.35)';
+              e.currentTarget.style.background='linear-gradient(135deg,#E8001E,#B0001A)';
+            }
           }}
           style={{
             width:'100%',
-            background:'linear-gradient(135deg,#E8001E,#B0001A)',
+            background:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?'#888':'linear-gradient(135deg,#E8001E,#B0001A)',
             color:'white',border:'none',borderRadius:12,padding:'14px',
-            cursor:'pointer',
+            cursor:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?'not-allowed':'pointer',
             display:'flex',flexDirection:'column',alignItems:'center',gap:2,
-            boxShadow:'0 4px 14px rgba(208,2,27,0.35)',
+            opacity:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?0.6:1,
+            boxShadow:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking)?'none':'0 4px 14px rgba(208,2,27,0.35)',
             transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
           }}>
           <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:16,letterSpacing:0.5,lineHeight:1.2}}>

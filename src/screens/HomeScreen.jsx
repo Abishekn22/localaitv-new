@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
 import BottomNav from './../components/BottomNav.jsx';
 import ClassifiedsSection from './../components/Sections/ClassifiedsSection.jsx';
@@ -105,33 +105,6 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     [refreshTick]
   );
 
-  // ── Bulletin shape adapter ────────────────────────────────
-  // New API → legacy rail. Keeps thumbnail/title/broadcastTime in sync with
-  // the strip rendered below. If the item already has the legacy fields
-  // (ytId/titleTe/broadcastTime — fallback BULLETINS data) it passes through.
-  const formatBulletinTime = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d)) return '';
-    return d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', hour12:true });
-  };
-  const mapBulletin = (b) => {
-    if (b && b.ytId) return b; // legacy/fallback shape
-    const imgHost = API_BASE.replace(/\/api\/?$/, '');
-    const thumb = b?.image_url
-      ? (b.image_url.startsWith('http') ? b.image_url : `${imgHost}${b.image_url}`)
-      : '';
-    return {
-      id:            b?.id,
-      titleTe:       b?.title || '',
-      titleEn:       b?.title || '',
-      broadcastTime: formatBulletinTime(b?.timestamp),
-      channel:       b?.priority_level ? `${b.priority_level.toUpperCase()}` : 'BULLETIN',
-      thumbnail:     thumb,
-      ytId:          null,
-      desc:          b?.content || '',
-    };
-  };
   // ── Incident → SHORT_NEWS shape adapter ───────────────────
   // Backend fields (real /api/incidents response):
   //   cover_image_path → full S3 image URL (used as thumbnail)
