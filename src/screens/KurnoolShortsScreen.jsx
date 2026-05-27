@@ -104,6 +104,36 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
     return d.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
   };
 
+  // Empty-state guard — when the feed has no items, render a bilingual
+  // placeholder instead of mounting <KurnoolShortItem item={undefined}/>,
+  // which would throw. Back arrow still works so the user can exit.
+  if (total === 0) {
+    return (
+      <div style={{ position:'fixed', inset:0, zIndex:300, background:'#000',
+        display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <button onClick={onClose}
+          style={{ position:'absolute', top:18, left:14, zIndex:21,
+            width:36, height:36, borderRadius:'50%',
+            background:'rgba(0,0,0,0.55)',
+            border:'1.5px solid rgba(255,255,255,0.22)',
+            color:'white', fontSize:18, cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center' }}>←</button>
+        <div style={{ textAlign:'center', padding:'0 24px' }}>
+          <div style={{ fontFamily:"'Noto Sans Telugu',sans-serif",
+            fontWeight:800, fontSize:20, lineHeight:1.4,
+            color:'rgba(255,255,255,0.85)', marginBottom:6 }}>
+            ప్రస్తుతం వీడియోలు లేవు
+          </div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif",
+            fontWeight:600, fontSize:13, letterSpacing:0.6,
+            color:'rgba(255,255,255,0.5)', textTransform:'uppercase' }}>
+            No videos yet
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:300, background:'#000',
       display:'flex', flexDirection:'column', overflow:'hidden' }}>

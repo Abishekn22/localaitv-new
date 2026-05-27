@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   T, useAppTheme, ThemeProvider,
   SHORT_NEWS, CLASSIFIEDS,
+  apiCall, useAPI,
 } from './_imports.js';
 
 import { publicVoiceToShortShape } from './components/Sections/ShortNewsSection.jsx';
+import { mapIncidentToShort } from './data/incidents.js';
 
 // Screens
 import SplashScreen           from './screens/SplashScreen.jsx';
@@ -78,12 +80,62 @@ import ReportSheet     from './components/sheets/ReportSheet.jsx';
 import PermissionSheet from './components/sheets/PermissionSheet.jsx';
 import Toast           from './components/Toast.jsx';
 
+// Lazy wrapper for the 'shortsfeed' route. Mounting this fires the
+// /api/incidents fetch; the fetch never runs when the user isn't on
+// the route. KurnoolShortsScreen now handles an empty feed with a
+// bilingual placeholder so a slow / empty API response no longer crashes.
+function ShortsFeedRoute({ onClose }) {
+  const { data: liveIncidents } = useAPI(
+    () => apiCall(`/incidents?page=1&limit=20`).then(d => d.items || d),
+    [],
+    []
+  );
+  const items = useMemo(
+    () => (Array.isArray(liveIncidents) ? liveIncidents.map(mapIncidentToShort) : []),
+    [liveIncidents]
+  );
+  return <KurnoolShortsScreen rawItems={items} initialIdx={0} onClose={onClose} />;
+}
+
 function App() {
   // ── Read current theme (set by ThemeProvider in AppRoot) ────
   // Phase 1: T is still the global dark object. Phase 2+ will
   // destructure T from here so components pick up light values.
   const { isDark: appIsDark } = useAppTheme();
-  const [screen, setScreen]             = useState('splash');
+
+  // ── Onboarding persistence ──────────────────────────────────
+  // First launch: no localaitv_device_id → mint a UUID, store it, and
+  // run the full splash → intro → location-picker flow.
+  // Returning launch: device ID + previously-picked constituency both
+  // present → skip splash and location, land on home immediately.
+  // Partial returning state (device ID exists but no constituency saved,
+  // e.g. user closed the app mid-onboarding) falls back to the full flow.
+  const __init = (() => {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return { isReturning:false, constituency:null, state:null };
+    }
+    try {
+      let id = window.localStorage.getItem('localaitv_device_id');
+      const isReturning = !!id;
+      if (!id) {
+        id = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID()
+          : ('d_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10));
+        window.localStorage.setItem('localaitv_device_id', id);
+      }
+      return {
+        isReturning,
+        constituency: window.localStorage.getItem('localaitv_constituency'),
+        state:        window.localStorage.getItem('localaitv_state'),
+      };
+    } catch (e) {
+      return { isReturning:false, constituency:null, state:null };
+    }
+  })();
+
+  const [screen, setScreen]             = useState(
+    __init.isReturning && __init.constituency ? 'home' : 'splash'
+  );
   const [navActive, setNavActive]       = useState('home');
   const [selectedNews, setSelectedNews] = useState(null);
   const [selectedChannel, setSelectedChannel] = useState(null);
@@ -93,10 +145,19 @@ function App() {
   const [toast, setToast]               = useState('');
   const [logoTaps, setLogoTaps]         = useState(0);
   const logoTapTimer                    = useRef(null);
-  // Location state — user's chosen constituency
-  const [userConstituency, setUserConstituency] = useState(null);
+  // Location state — user's chosen constituency, restored from localStorage on mount.
+  const [userConstituency, setUserConstituency] = useState(__init.constituency || null);
   const [classifiedsCat, setClassifiedsCat] = useState('All'); // initial category for ClassifiedsScreen
-  const [userState,        setUserState]        = useState(null);
+  const [userState,        setUserState]        = useState(__init.state || null);
+
+  // Write helper — every place that updates the chosen location must also
+  // persist it, so the next launch can skip the picker.
+  function persistLocation(c, s) {
+    try {
+      if (c) window.localStorage.setItem('localaitv_constituency', c);
+      if (s) window.localStorage.setItem('localaitv_state', s);
+    } catch (e) {}
+  }
 
   // Registration state — required to upload news (citizen reporter accountability)
   const [isRegistered, setIsRegistered] = useState(() => {
@@ -245,7 +306,7 @@ function App() {
         }
       }} />;
       case 'intro':      return <IntroScreen onDone={() => setScreen(userConstituency?'home':'location')} />;
-      case 'location':   return <LocationPickerScreen onDone={(c,s)=>{ setUserConstituency(c); setUserState(s); setScreen('home'); setNavActive('home'); }} />;
+      case 'location':   return <LocationPickerScreen onDone={(c,s)=>{ setUserConstituency(c); setUserState(s); persistLocation(c,s); setScreen('home'); setNavActive('home'); }} />;
       case 'home':       return (
         <div style={{position:'relative',width:'100%',height:'100%'}}>
           <HomeScreen
@@ -276,6 +337,8 @@ function App() {
             // Save anything the user provided (all fields are optional)
             if (data?.constituency) setUserConstituency(data.constituency);
             if (data?.state) setUserState(data.state);
+            // Persist so the next launch can skip the location picker.
+            if (data?.constituency || data?.state) persistLocation(data.constituency, data.state);
             if (data?.name || data?.mobile || data?.photo) {
               setUserProfile(prev => ({ ...prev,
                 ...(data.name && { name: data.name }),
@@ -309,7 +372,7 @@ function App() {
         </div>
       );
       case 'local':      return <LocalScreen onNavigate={navigate} constituency={userConstituency||'Kurnool'} onOpenCat={(c)=>{setClassifiedsCat(c); navigate('classifiedsfeed');}} />;
-      case 'shortsfeed':      return <KurnoolShortsScreen rawItems={SHORT_NEWS} initialIdx={0} onClose={()=>navigate('home')}/>;
+      case 'shortsfeed':      return <ShortsFeedRoute onClose={()=>navigate('home')} />;
       case 'publicvoicefeed': {
         // Public Voice opens in the Mana Kurnool Shorts viewer with
         // pv-items mapped to the SHORT_NEWS shape. ONLY uploaded form

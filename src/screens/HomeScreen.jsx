@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
+import { mapIncidentToShort, resolveMediaUrl } from './../data/incidents.js';
+
 import BottomNav from './../components/BottomNav.jsx';
 import ClassifiedsSection from './../components/Sections/ClassifiedsSection.jsx';
 import DistrictNewsFeedScreen from './DistrictNewsFeedScreen.jsx';
@@ -88,6 +90,60 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     return () => clearInterval(t);
   }, []);
 
+  // ── OpenWeatherMap live weather ────────────────────────────
+  // Free-tier key embedded in the bundle (per OWM convention).
+  // Refresh whenever the active channel switches and on a 15-min tick.
+  // Cached in component state — only one in-flight request per city.
+  // Falls back silently on error (the widget renders a neutral placeholder).
+  const OWM_KEY = 'cdbf68f3afc557e674b97c9f52536ab6';
+  const [weather, setWeather] = useState(null); // { city, temp, main, icon }
+  const [weatherTick, setWeatherTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setWeatherTick(v => v + 1), 15 * 60 * 1000); // 15 min
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    const city = activeChannel?.nameEn;
+    if (!city) return;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    fetch(
+      `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city + ',IN')}&appid=${OWM_KEY}&units=metric`,
+      { signal: ctrl.signal }
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d || !d.main) return;
+        setWeather({
+          city,
+          temp: d.main.temp,
+          main: d.weather && d.weather[0] ? d.weather[0].main : '',
+          icon: d.weather && d.weather[0] ? d.weather[0].icon : '',
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; ctrl.abort(); };
+  }, [activeChannel?.nameEn, weatherTick]);
+  // OWM "main" → emoji. Defaults to a neutral cloud-sun if we can't classify.
+  const weatherEmoji = (main) => {
+    switch ((main || '').toLowerCase()) {
+      case 'clear':         return '☀️';
+      case 'clouds':        return '☁️';
+      case 'rain':          return '🌧️';
+      case 'drizzle':       return '🌦️';
+      case 'thunderstorm':  return '⛈️';
+      case 'snow':          return '❄️';
+      case 'mist':
+      case 'smoke':
+      case 'haze':
+      case 'fog':           return '🌫️';
+      default:              return '🌤️';
+    }
+  };
+  // Only render API data for the currently-selected channel — guards against
+  // stale data briefly showing during a channel switch.
+  const weatherForActive = (weather && weather.city === activeChannel?.nameEn) ? weather : null;
+
   const { data: liveNews, loading: newsLoading, error: newsError } = useAPI(
     () => apiCall(`/news?constituency=${encodeURIComponent(displayConstituency)}&limit=20`).then(d => d.items || d),
     NEWS_ITEMS,
@@ -109,39 +165,9 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     [refreshTick]
   );
 
-  // ── Incident → SHORT_NEWS shape adapter ───────────────────
-  // Backend fields (real /api/incidents response):
-  //   cover_image_path → full S3 image URL (used as thumbnail)
-  //   video_path       → full S3 video URL (drives HTML5 <video> in viewer)
-  //   is_live (0|1)    → live flag
-  //   post_location    → plain city string fallback
-  // Legacy paths kept as fallbacks in case staging/dev returns the older shape.
-  const resolveMediaUrl = (u) => {
-    if (!u) return '';
-    if (u.startsWith('http')) return u;
-    const imgHost = API_BASE.replace(/\/api\/?$/, '');
-    return `${imgHost}${u}`;
-  };
-  const mapIncidentToShort = (it) => ({
-    id:          it?.id,
-    orientation: 'vertical',
-    titleTe:     it?.title || '',
-    titleEn:     it?.title || '',
-    fullText:    it?.description || it?.title || '',
-    channel:     it?.location?.city ? `${it.location.city} TV` : (it?.post_location ? `${it.post_location} TV` : 'INCIDENTS'),
-    reporter:    it?.author_name || '',
-    location:    it?.location?.city || it?.location?.area || it?.post_location || '',
-    category:    it?.category?.name || 'Incident',
-    views:       '',
-    duration:    '',
-    live:        !!(it?.is_live),
-    uploadDate:  '',
-    uploadTime:  '',
-    img:         resolveMediaUrl(it?.cover_image_path || it?.thumbnail),
-    mediaUrl:    resolveMediaUrl(it?.video_path || it?.media_url),
-    bg:          ['#1a0a00','#7a1500'],
-    uploadedAt:  it?.created_at ? new Date(it.created_at) : new Date(),
-  });
+  // Incident → SHORT_NEWS shape adapter + media URL resolver are shared
+  // with the App-level 'shortsfeed' route via src/data/incidents.js so
+  // both feeds project incidents the same way.
 
   // Incident → news-shape projection used by both the Top Stories rail
   // cards and the DistrictNewsFeedScreen viewer that opens on tap. The
@@ -222,7 +248,10 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     () => (Array.isArray(liveIncidents) ? liveIncidents.map(mapIncidentToRailItem) : []),
     [liveIncidents]
   );
-  const filteredHome = useMemo(() => incidentsRailItems.slice(0, 10), [incidentsRailItems]);
+  // Top Stories rail skips the first incident — it's already promoted to
+  // the FeaturedStoryHero above. Slice (1, 11) so we keep up to 10 items
+  // in the rail without visually duplicating the lead.
+  const filteredHome = useMemo(() => incidentsRailItems.slice(1, 11), [incidentsRailItems]);
 
   return (
     <div className="ott-screen-in"
@@ -957,30 +986,20 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
             padding:'5px 10px',
             minWidth:72,
           }}>
-            {/* Weather icon — changes by channel (demo data) */}
+            {/* Live weather icon — driven by OpenWeatherMap. Falls back to
+                a neutral cloud-sun glyph during the first fetch / on error. */}
             <span style={{fontSize:18}}>
-              {activeChannel.id==='kur'||activeChannel.id==='gun'||activeChannel.id==='nel'?'☀️':
-               activeChannel.id==='kak'?'🌤️':
-               activeChannel.id==='tpt'?'⛅':
-               activeChannel.id==='khm'?'🌦️':
-               activeChannel.id==='kar'?'☀️':
-               activeChannel.id==='war'?'🌤️':'⛅'}
+              {weatherForActive ? weatherEmoji(weatherForActive.main) : '🌤️'}
             </span>
             <div>
-              {/* Temperature — matched to dropdown channel-name font size (14 → 12) */}
+              {/* Live temperature — rounded to the nearest whole °C. Shows
+                  an em-dash while the first request for this city is in flight. */}
               <div style={{
                 fontFamily:"'Barlow Condensed',sans-serif",
                 fontWeight:700, fontSize:12, lineHeight:1.2,
                 color:T.text,
               }}>
-                {activeChannel.id==='kur'?'34°':
-                 activeChannel.id==='gun'?'36°':
-                 activeChannel.id==='nel'?'33°':
-                 activeChannel.id==='kak'?'31°':
-                 activeChannel.id==='tpt'?'32°':
-                 activeChannel.id==='khm'?'30°':
-                 activeChannel.id==='kar'?'35°':
-                 activeChannel.id==='war'?'32°':'31°'}C
+                {weatherForActive ? `${Math.round(weatherForActive.temp)}°C` : '—'}
               </div>
               {/* City — matched to dropdown English-name font size (8 → 11) */}
               <div style={{
@@ -1230,16 +1249,17 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         </Reveal>
 
         {/* ══ FEATURED STORY HERO — Phase 4 editorial drama ══════════
-            Singular dominant lead-story card. Must emotionally overpower
-            the rails below. Pulls the top item from the live news feed
-            (which is curated by the backend AI ranker). NOT a rail —
-            sits ABOVE Classifieds as a one-off hero card so the user's
-            "classifieds at top of rails" preference is preserved. */}
+            Singular dominant lead-story card. Pulls the top item from
+            /api/incidents (the same feed that powers the Top Stories
+            rail below). NOT a rail — sits ABOVE Classifieds as a one-off
+            hero. Tap opens the same DistrictNewsFeedScreen overlay the
+            Top Stories cards do, pinned at the hero's incident
+            (index 0 in the sorted feed). */}
         <Reveal delay={0.04}>
           <FeaturedStoryHero
-            item={newsToShow && newsToShow[0]}
-            loading={newsLoading && !(newsToShow && newsToShow.length)}
-            onOpenNews={onOpenNews}
+            item={incidentsRailItems[0]}
+            loading={incidentsLoading && incidentsRailItems.length === 0}
+            onOpenNews={() => setTopStoriesViewerIdx(0)}
           />
         </Reveal>
 

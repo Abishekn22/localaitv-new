@@ -37,8 +37,10 @@ function KurnoolShortItem({ item, isActive, onShare, onBell }) {
     else          { v.pause();                 setIsPlaying(false); }
   };
 
-  // Reset playing flag whenever the active item changes
-  useEffect(() => { setIsPlaying(true); }, [item.id]);
+  // Reset playing flag whenever the active item changes. Optional-chained
+  // dep so a transient undefined item (e.g. empty feed mount before parent
+  // renders its empty state) doesn't throw.
+  useEffect(() => { setIsPlaying(true); }, [item?.id]);
 
   // Reset state when item changes
   useEffect(() => {
@@ -48,7 +50,12 @@ function KurnoolShortItem({ item, isActive, onShare, onBell }) {
     setShowRating(false);
     setRatingDone(false);
     setRatingVal(0);
-  }, [item.id]);
+  }, [item?.id]);
+
+  // Defensive null-guard placed AFTER all hooks (Rules of Hooks compliant).
+  // The parent screen already renders an empty state when its feed is
+  // empty, but this catches any stray mount with an undefined item.
+  if (!item) return null;
 
   const handleLike = () => {
     if (!liked) { setLiked(true); setDisliked(false); setLikeCount(c => c + 1); }
