@@ -48,7 +48,7 @@ Stay informed about ${constituency || 'your area'} like never before.
 🍎 iPhone: ${IOS_URL}
 🔗 Smart Link: ${SMART_LINK}
 
-📡 YouTube: https://youtube.com/@localaitv`;
+📡 YouTube: https://www.youtube.com/@Localaitv`;
 
   const PROMO_TEXT_SHORT = `📺 LocalAI TV — India's first AI hyperlocal Telugu news app! Get live news from ${constituency || 'your constituency'}. Download: ${SMART_LINK}`;
 
@@ -291,12 +291,12 @@ Stay informed about ${constituency || 'your area'}.`}
         {/* ════════════════════════════════════════════════ */}
         {/* SECTION 5: YOUTUBE LINK                          */}
         {/* ════════════════════════════════════════════════ */}
-        <div onClick={()=>window.open('https://youtube.com/@localaitv','_blank')}
+        <div onClick={()=>window.open('https://www.youtube.com/@Localaitv','_blank')}
           style={{background:'rgba(255,0,0,0.08)',border:'1px solid rgba(255,0,0,0.2)',borderRadius:14,padding:'14px 16px',display:'flex',alignItems:'center',gap:12,cursor:'pointer'}}>
           <span style={{fontSize:28}}>▶️</span>
           <div style={{flex:1}}>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text}}>Subscribe on YouTube</div>
-            <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>youtube.com/@localaitv</div>
+            <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>youtube.com/@Localaitv</div>
           </div>
           <span style={{fontSize:14,color:T.red}}>↗</span>
         </div>

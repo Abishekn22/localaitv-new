@@ -10,7 +10,7 @@ function SocialShareRow() {
   const PLATFORMS = [
     { icon:'💬', label:'WhatsApp',  color:'#25D366', action:()=>window.open(`https://api.whatsapp.com/send?text=${MSG}`,'_blank') },
     { icon:'✈️', label:'Telegram',  color:'#0088cc', action:()=>window.open(`https://t.me/share/url?url=${encodeURIComponent(DOWNLOAD_URL)}&text=${MSG}`,'_blank') },
-    { icon:'▶️', label:'YouTube',   color:'#FF0000', action:()=>window.open('https://www.youtube.com/@localaitv','_blank') },
+    { icon:'▶️', label:'YouTube',   color:'#FF0000', action:()=>window.open('https://www.youtube.com/@Localaitv','_blank') },
     { icon:'𝕏',  label:'X',         color:'#000000', action:()=>window.open(`https://twitter.com/intent/tweet?text=${SHORT_MSG}`,'_blank') },
     { icon:'👥', label:'Facebook',  color:'#1877F2', action:()=>window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(DOWNLOAD_URL)}`,'_blank') },
     { icon:'📸', label:'Instagram', color:'#E1306C', action:()=>{ navigator.clipboard?.writeText(DOWNLOAD_URL);  } },

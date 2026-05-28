@@ -700,7 +700,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               {/* Social icons row */}
               <div style={{display:'flex', gap:14, padding:'0 18px 18px'}}>
                 {/* X (Twitter) */}
-                <a href="https://twitter.com/localaitv" target="_blank" rel="noreferrer"
+                <a href="https://x.com/localaitv/" target="_blank" rel="noreferrer"
                   style={{ width:44, height:44, borderRadius:'50%', background:'#000',
                     display:'flex', alignItems:'center', justifyContent:'center', textDecoration:'none' }}>
                   <svg width={20} height={20} viewBox="0 0 32 32" fill="white">
@@ -708,7 +708,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                   </svg>
                 </a>
                 {/* Facebook */}
-                <a href="https://facebook.com/localaitv" target="_blank" rel="noreferrer"
+                <a href="https://www.facebook.com/people/Local-AI-Media-Network-Private-Limited/61578436672896/" target="_blank" rel="noreferrer"
                   style={{ width:44, height:44, borderRadius:'50%', background:'#1877F2',
                     display:'flex', alignItems:'center', justifyContent:'center', textDecoration:'none' }}>
                   <svg width={20} height={20} viewBox="0 0 32 32" fill="white">
@@ -716,7 +716,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                   </svg>
                 </a>
                 {/* Instagram */}
-                <a href="https://instagram.com/localaitv" target="_blank" rel="noreferrer"
+                <a href="https://www.instagram.com/localaitv" target="_blank" rel="noreferrer"
                   style={{ width:44, height:44, borderRadius:'50%',
                     background:'linear-gradient(135deg,#FFD600 0%,#FF7A00 25%,#FF1A6F 60%,#A845C9 100%)',
                     display:'flex', alignItems:'center', justifyContent:'center', textDecoration:'none' }}>
@@ -727,7 +727,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                   </svg>
                 </a>
                 {/* YouTube */}
-                <a href="https://youtube.com/@localaitv" target="_blank" rel="noreferrer"
+                <a href="https://www.youtube.com/@Localaitv" target="_blank" rel="noreferrer"
                   style={{ width:44, height:44, borderRadius:'50%', background:'#FF0000',
                     display:'flex', alignItems:'center', justifyContent:'center', textDecoration:'none' }}>
                   <svg width={22} height={22} viewBox="0 0 24 24" fill="white">
@@ -1713,7 +1713,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
 
           {/* Row 1 — Subscribe on YouTube + Share App */}
           <div style={{display:'flex',gap:8,marginBottom:8}}>
-            <a href="https://www.youtube.com/@localaitv" target="_blank" rel="noreferrer"
+            <a href="https://www.youtube.com/@Localaitv" target="_blank" rel="noreferrer"
               onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px) scale(1.02)'; e.currentTarget.style.boxShadow=`0 6px 20px ${T.red}66`;}}
               onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0) scale(1)'; e.currentTarget.style.boxShadow=`0 4px 16px ${T.red}44`;}}
               style={{flex:1,background:T.red,color:'white',borderRadius:14,padding:'11px',fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,cursor:'pointer',boxShadow:`0 4px 16px ${T.red}44`,textDecoration:'none',transition:'all 0.2s cubic-bezier(0.22,1,0.36,1)'}}>
@@ -1750,17 +1750,17 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
           </div>
           <div style={{display:'flex',gap:8,justifyContent:'center',alignItems:'center',flexWrap:'nowrap',overflowX:'auto',scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
             {[
-              { label:'X/Twitter', href:'https://twitter.com/localaitv',  color:'#000000', bg:T.isDark?'rgba(255,255,255,0.08)':'#0F0F0F',
+              { label:'X/Twitter', href:'https://x.com/localaitv/',  color:'#000000', bg:T.isDark?'rgba(255,255,255,0.08)':'#0F0F0F',
                 icon:<svg width={16} height={16} viewBox="0 0 32 32" fill="white"><path d="M18.24 14.17L27.1 4h-2.1l-7.7 8.95L11 4H4l9.3 13.53L4 28h2.1l8.13-9.45L21 28h7z"/></svg> },
               { label:'Telegram',  href:'https://t.me/localaitv',         color:'#0088CC', bg:'rgba(0,136,204,0.12)',
                 icon:<svg width={16} height={16} viewBox="0 0 32 32" fill="#0088CC"><path d="M16 2C8.27 2 2 8.27 2 16s6.27 14 14 14 14-6.27 14-14S23.73 2 16 2zm6.84 9.58l-2.36 11.12c-.18.8-.64 1-1.3.62l-3.6-2.65-1.73 1.67c-.2.2-.36.36-.73.36l.26-3.68 6.7-6.05c.3-.26-.06-.4-.44-.14l-8.28 5.21-3.57-1.12c-.78-.24-.8-.78.16-1.15l13.93-5.37c.64-.24 1.2.14.96 1.18z"/></svg> },
               { label:'WhatsApp',  href:'https://whatsapp.com/channel/localaitv', color:'#25D366', bg:'rgba(37,211,102,0.12)',
                 icon:<svg width={16} height={16} viewBox="0 0 32 32" fill="#25D366"><path d="M16 2C8.28 2 2 8.28 2 16c0 2.46.67 4.76 1.83 6.74L2 30l7.44-1.79A13.94 13.94 0 0016 30c7.72 0 14-6.28 14-14S23.72 2 16 2zm7.1 19.1c-.3.84-1.76 1.6-2.4 1.7-.62.1-1.4.14-2.26-.14a20.6 20.6 0 01-2.04-.75c-3.58-1.55-5.92-5.16-6.1-5.4-.18-.24-1.46-1.94-1.46-3.7s.92-2.62 1.26-2.98c.3-.34.66-.42.88-.42l.64.01c.2 0 .48-.08.74.56.28.66.94 2.3.02 2.56l-.5.22c-.28.14-.52.3-.36.6.16.3.7 1.16 1.5 1.88l1.44 1.14c.3.16.6.12.82-.12.22-.24.9-1.04 1.14-1.4.24-.36.48-.3.8-.18.32.12 2.02.96 2.36 1.13.34.18.58.26.66.4.08.16.08.9-.22 1.74z"/></svg> },
-              { label:'Facebook',  href:'https://www.facebook.com/localaitv', color:'#1877F2', bg:'rgba(24,119,242,0.12)',
+              { label:'Facebook',  href:'https://www.facebook.com/people/Local-AI-Media-Network-Private-Limited/61578436672896/', color:'#1877F2', bg:'rgba(24,119,242,0.12)',
                 icon:<svg width={16} height={16} viewBox="0 0 32 32" fill="#1877F2"><path d="M16 2C8.27 2 2 8.27 2 16c0 6.99 5.12 12.77 11.81 13.82V19.9h-3.55V16h3.55v-3.08c0-3.51 2.09-5.44 5.28-5.44 1.53 0 3.12.27 3.12.27v3.44h-1.76c-1.73 0-2.27 1.07-2.27 2.17V16h3.87l-.62 3.9h-3.25v9.92C24.88 28.77 30 22.99 30 16c0-7.73-6.27-14-14-14z"/></svg> },
-              { label:'Instagram', href:'https://instagram.com/localaitv', color:'#E1306C', bg:'rgba(225,48,108,0.12)',
+              { label:'Instagram', href:'https://www.instagram.com/localaitv', color:'#E1306C', bg:'rgba(225,48,108,0.12)',
                 icon:<svg width={16} height={16} viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="24" height="24" rx="6" stroke="#E1306C" strokeWidth="2.4"/><circle cx="16" cy="16" r="5.5" stroke="#E1306C" strokeWidth="2.4"/><circle cx="23" cy="9" r="1.5" fill="#E1306C"/></svg> },
-              { label:'LinkedIn',  href:'https://linkedin.com/company/localaitv', color:'#0A66C2', bg:'rgba(10,102,194,0.12)',
+              { label:'LinkedIn',  href:'https://www.linkedin.com/company/local-ai-media-network-private-limited/?viewAsMember=true', color:'#0A66C2', bg:'rgba(10,102,194,0.12)',
                 icon:<svg width={16} height={16} viewBox="0 0 32 32" fill="#0A66C2"><path d="M26 2H6C3.79 2 2 3.79 2 6v20c0 2.21 1.79 4 4 4h20c2.21 0 4-1.79 4-4V6c0-2.21-1.79-4-4-4zM10 25H6V12h4v13zM8 10c-1.38 0-2.5-1.12-2.5-2.5S6.62 5 8 5s2.5 1.12 2.5 2.5S9.38 10 8 10zm18 15h-4v-7c0-1.66-.34-3-2-3s-2 1.34-2 3v7h-4V12h4v2c.62-.92 1.92-2 4-2 3.31 0 6 2.69 6 6v7z"/></svg> },
             ].map(p => (
               <a key={p.label} href={p.href} target="_blank" rel="noreferrer" title={p.label}
