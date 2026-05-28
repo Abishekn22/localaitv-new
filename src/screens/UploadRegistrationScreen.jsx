@@ -111,12 +111,17 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
       fd.append('purpose', 'registration');
       const response = await fetch(`${API_BASE}/kyc/upload-photo`, {
         method: 'POST',
-        body: fd,
+        body: fd,                       // FormData → never set Content-Type
         credentials: 'include',
       });
       const data = await response.json().catch(() => null);
-      if (response.ok && data && data.success && data.data && data.data.path) {
-        return { ok: true, path: data.data.path, url: data.data.url || '' };
+      // Accept whatever shape the backend uses for the stored path.
+      const path = data && (
+        (data.data && (data.data.path || data.data.url || data.data.file_url)) ||
+        data.path || data.url || data.file_url || data.profile_photo
+      );
+      if (response.ok && path) {
+        return { ok: true, path, url: (data && (data.url || (data.data && data.data.url))) || '' };
       }
       return { ok: false, message: (data && data.message) || 'Photo upload failed' };
     } catch (e) {
@@ -275,11 +280,17 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
     const reg = await registerApi(payload);
     setSubmitting(false);
     if (!reg.ok) { setSubmitMsg(reg.message || 'Registration failed.'); return; }
-    setSession({ token: reg.token, user: reg.user });
+    // Merge the uploaded photo path into the stored user so the profile shows it
+    // even if the register response doesn't echo profile_photo back.
+    const mergedUser = {
+      ...(reg.user || {}),
+      ...(profilePhotoPath ? { profile_photo: (reg.user && (reg.user.profile_photo || reg.user.profile_picture)) || profilePhotoPath } : {}),
+    };
+    setSession({ token: reg.token, user: mergedUser });
     setSubmitMsg('');
     onSubmitDone({
       state, constituency, name, mobile, photo,
-      profile_photo: profilePhotoPath, token: reg.token, user: reg.user,
+      profile_photo: profilePhotoPath, token: reg.token, user: mergedUser,
     });
   }
 

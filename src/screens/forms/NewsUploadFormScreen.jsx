@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
+import { useAuth } from '../../contexts/AuthContext.jsx';
+import { uploadMediaChunked, mediaKindOf, DIRECT_THRESHOLD, MAX_REPORT_FILE_BYTES } from '../../utils/reportUpload.js';
+import MediaCaptureModal from '../../components/MediaCaptureModal.jsx';
 
 function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
   const { T } = useAppTheme();
+  const { user, token } = useAuth();
+  // Live camera capture overlay: null | 'photo' | 'video'
+  const [capture, setCapture] = useState(null);
+  // Add a captured/picked file to the media list (cap at 3).
+  const addMediaFile = (f) => {
+    if (!f) return;
+    setMediaFiles(prev => (prev.length >= 3 ? prev : [...prev, f]));
+    setMediaPreviews(prev => (prev.length >= 3 ? prev : [...prev, URL.createObjectURL(f)]));
+  };
   const [step,        setStep]        = useState(0); // 0=form, 1=uploading, 2=result
   const [headline,    setHeadline]    = useState('');
   const [details,     setDetails]     = useState('');
@@ -56,11 +68,19 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
     rec.lang = voiceLang;
-    rec.continuous = false;
-    rec.interimResults = true;
+    rec.continuous = true;        // keep listening until the user taps Stop
+    rec.interimResults = true;    // stream a live transcript while speaking
 
     setVoiceField(field);
     setInterimText('');
+
+    const appendFinal = (text) => {
+      const add = (text || '').trim();
+      if (!add) return;
+      if (field === 'headline') setHeadline(p => (p ? p + ' ' : '') + add);
+      if (field === 'details')  setDetails(p  => (p ? p + ' ' : '') + add);
+      if (field === 'location') setLocation(p => (p ? p + ' ' : '') + add);
+    };
 
     rec.onresult = (e) => {
       let interim = '';
@@ -70,24 +90,29 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
         if (e.results[i].isFinal) final += t;
         else interim += t;
       }
-      setInterimText(interim);
-      // Auto-detect language from characters returned
+      setInterimText(interim);                       // live preview as you speak
       if (final) {
         const hasTeluguChars = /[ఀ-౿]/.test(final);
         setDetectedLang(hasTeluguChars ? '🇮🇳 Telugu' : '🇬🇧 English');
-        // Append to the right field
-        if (field === 'headline') setHeadline(p => (p + ' ' + final).trim());
-        if (field === 'details')  setDetails(p  => (p + ' ' + final).trim());
-        if (field === 'location') setLocation(p => (p + ' ' + final).trim());
+        appendFinal(final);                          // commit each finished phrase
         setInterimText('');
-        setVoiceField(null);
       }
     };
-    rec.onerror = () => { setVoiceField(null); setInterimText(''); };
-    rec.onend   = () => { setVoiceField(null); setInterimText(''); };
+    rec.onerror = (ev) => {
+      if (ev && (ev.error === 'not-allowed' || ev.error === 'service-not-allowed')) {
+        alert('Microphone permission denied. Please allow mic access in your browser and try again.');
+      }
+      setVoiceField(null); setInterimText(''); recognitionRef.current = null;
+    };
+    rec.onend = () => {
+      // Commit any trailing interim text the engine never marked "final".
+      setInterimText(cur => { if (cur && cur.trim()) appendFinal(cur); return ''; });
+      setVoiceField(null);
+      recognitionRef.current = null;
+    };
 
     recognitionRef.current = rec;
-    rec.start();
+    try { rec.start(); } catch (e) { setVoiceField(null); setInterimText(''); }
   }
 
   function stopVoice() {
@@ -168,7 +193,21 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
     { label:'Sent to editorial team for verification',   done:false },
   ];
 
-  function startUpload() {
+  // Reveal the AI-moderation steps one by one as the success confirmation.
+  function runResultAnimation() {
+    const steps = AI_STEPS_APPROVED;
+    setAiSteps([]);
+    steps.forEach((s, i) => {
+      setTimeout(() => {
+        setAiSteps(prev => [...prev, { ...s, done: true }]);
+        if (i === steps.length - 1) {
+          setTimeout(() => { setAiResult('approved'); setStep(2); }, 600);
+        }
+      }, 300 + i * 500);
+    });
+  }
+
+  async function startUpload() {
     // Reset previous flags
     setValidationError('');
     setInvalidFields({headline:false,details:false,media:false,confirm:false});
@@ -195,30 +234,91 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
       setInvalidFields({ headline:headlineBad, details:detailsBad, media:mediaBad, confirm:confirmBad });
       return;
     }
+
+    // Must be signed in to submit a report.
+    if (!token) {
+      setValidationError('• Please sign in before uploading.');
+      return;
+    }
+    // Reject any file over the 2 GB hard cap before uploading anything.
+    const tooBig = mediaFiles.find(f => f.size > MAX_REPORT_FILE_BYTES);
+    if (tooBig) {
+      setValidationError(`• "${tooBig.name || 'File'}" is larger than the 2 GB limit. Please choose a smaller file.`);
+      setInvalidFields(prev => ({ ...prev, media: true }));
+      return;
+    }
+
     setStep(1);
     setUploadPct(0);
     setAiSteps([]);
-    // Simulate upload progress
-    let pct = 0;
-    const pTimer = setInterval(() => {
-      pct += 4;
-      setUploadPct(Math.min(pct, 100));
-      if (pct >= 100) clearInterval(pTimer);
-    }, 60);
-    // Reveal AI steps one by one
-    const outcome = Math.random() > 0.2 ? 'approved' : 'review';
-    const steps = outcome === 'approved' ? AI_STEPS_APPROVED : AI_STEPS_REVIEW;
-    steps.forEach((s, i) => {
-      setTimeout(() => {
-        setAiSteps(prev => [...prev, { ...s, done: true }]);
-        if (i === steps.length - 1) {
-          setTimeout(() => {
-            setAiResult(outcome);
-            setStep(2);
-          }, 600);
+
+    try {
+      // Split selected media by MIME; large files go through the chunked
+      // pipeline, small ones ride directly in the /reports FormData.
+      const video_paths = [], image_paths = [], audio_paths = [];
+      const directVideos = [], directImages = [], directAudios = [];
+      const chunkedBytes = mediaFiles
+        .filter(f => f.size > DIRECT_THRESHOLD)
+        .reduce((a, f) => a + f.size, 0);
+      let doneBytes = 0;
+
+      for (const file of mediaFiles) {
+        const kind = mediaKindOf(file);
+        const pathsArr  = kind === 'video' ? video_paths  : kind === 'audio' ? audio_paths  : image_paths;
+        const directArr = kind === 'video' ? directVideos : kind === 'audio' ? directAudios : directImages;
+        if (file.size > DIRECT_THRESHOLD) {
+          const path = await uploadMediaChunked({
+            blob: file, kind, originalName: file.name, token,
+            onProgress: (frac) => {
+              const overall = chunkedBytes ? (doneBytes + frac * file.size) / chunkedBytes : 0;
+              setUploadPct(Math.min(90, Math.round(overall * 90)));
+            },
+          });
+          doneBytes += file.size;
+          pathsArr.push(path);
+        } else {
+          directArr.push(file);
         }
-      }, 600 + i * 700);
-    });
+      }
+      setUploadPct(prev => Math.max(prev, 92));
+
+      // One FormData for POST /reports — field names must match the backend
+      // validator / upload.fields config exactly.
+      const fd = new FormData();
+      fd.append('name', (user?.name || '').trim());
+      fd.append('email', user?.email || '');
+      fd.append('subject', headline.trim());
+      fd.append('location', (location || '').trim());
+      fd.append('message', details.trim());
+      fd.append('video_paths', JSON.stringify(video_paths));
+      fd.append('image_paths', JSON.stringify(image_paths));
+      fd.append('audio_paths', JSON.stringify(audio_paths));
+      directVideos.forEach(f => fd.append('video', f));
+      directImages.forEach(f => fd.append('image', f));
+      directAudios.forEach(f => fd.append('audio', f));
+
+      // FormData request → Authorization only, never set Content-Type.
+      const res = await fetch(`${API_BASE}/reports`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: fd,
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        const msg = (d && d.message)
+          || (d && Array.isArray(d.errors) ? d.errors.map(e => e.msg).filter(Boolean).join('\n') : '')
+          || `Submission failed (${res.status}).`;
+        setStep(0);
+        setValidationError(msg);
+        return;
+      }
+
+      setUploadPct(100);
+      runResultAnimation();
+    } catch (e) {
+      setStep(0);
+      setValidationError('• Upload failed: ' + ((e && e.message) || 'network error') + '. Please try again.');
+    }
   }
 
   // ── STEP 0: Fill form ──────────────────────────────────────
@@ -377,8 +477,9 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
             {/* PHOTO — square, English only */}
             <button onClick={()=>{
               if(mediaType!=='photo'){setMediaFiles([]);setMediaPreviews([]);}
+              if(mediaPreviews.length>=3){alert('Maximum allowed is 3 files.');return;}
               setMediaType('photo');
-              document.getElementById('news-photo-input')?.click();
+              setCapture('photo');
             }}
             onMouseEnter={e=>{
               e.currentTarget.style.transform='translateY(-4px) scale(1.04)';
@@ -419,8 +520,9 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
             {/* VIDEO — square, English only */}
             <button onClick={()=>{
               if(mediaType!=='video'){setMediaFiles([]);setMediaPreviews([]);}
+              if(mediaPreviews.length>=3){alert('Maximum allowed is 3 files.');return;}
               setMediaType('video');
-              document.getElementById('news-video-input')?.click();
+              setCapture('video');
             }}
             onMouseEnter={e=>{
               e.currentTarget.style.transform='translateY(-4px) scale(1.04)';
@@ -576,7 +678,11 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
               {/* Add slot — shown while < 3 uploaded */}
               {mediaPreviews.length < 3 && (
-                <div onClick={()=>document.getElementById(mediaType==='video'?'news-video-input':mediaType==='text'?'news-library-input':'news-photo-input')?.click()}
+                <div onClick={()=>{
+                    if(mediaType==='photo') setCapture('photo');
+                    else if(mediaType==='video') setCapture('video');
+                    else document.getElementById('news-library-input')?.click();
+                  }}
                   style={{flex:1,aspectRatio:'1',borderRadius:12,
                     border:`1.5px dashed ${T.border}`,background:T.bg3,
                     display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
@@ -624,7 +730,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
             <div style={{fontSize:11,color:T.textMuted,marginTop:1}}>Type Text /Record Voice (Min 4 Words)</div>
           </div>
 
-          <input value={voiceField==='headline' && interimText ? interimText : headline}
+          <input value={voiceField==='headline' && interimText ? (headline ? headline + ' ' : '') + interimText : headline}
             onChange={e=>setHeadline(e.target.value)} maxLength={100}
             placeholder="హెడ్‌లైన్‌ను ఇక్కడ టైప్ చేయండి"
             style={{width:'100%',background:invalidFields.headline?'rgba(229,57,53,0.06)':(T.isDark?T.bg3:'#FAFBFC'),
@@ -790,7 +896,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
           {/* Input with pin icon on the RIGHT */}
           <div style={{position:'relative'}}>
-            <input value={voiceField==='location' && interimText ? interimText : location}
+            <input value={voiceField==='location' && interimText ? (location ? location + ' ' : '') + interimText : location}
               onChange={e=>setLocation(e.target.value)}
               placeholder="వీధి / ప్రాంతం / గ్రామం / పట్టణం"
               style={{width:'100%',background:T.isDark?T.bg3:'#FAFBFC',
@@ -921,6 +1027,21 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
           );
         })()}
       </div>
+
+      {/* Live camera capture (photo / video) — opens the real camera on
+          desktop + mobile; falls back to the hidden file inputs on error. */}
+      {capture && (
+        <MediaCaptureModal
+          mode={capture}
+          onClose={() => setCapture(null)}
+          onCapture={(file) => { addMediaFile(file); setCapture(null); }}
+          onFallback={() => {
+            const id = capture === 'video' ? 'news-video-input' : 'news-photo-input';
+            setCapture(null);
+            document.getElementById(id)?.click();
+          }}
+        />
+      )}
     </div>
   );
 
