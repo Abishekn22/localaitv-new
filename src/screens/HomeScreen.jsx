@@ -19,7 +19,7 @@ import { LocationPin, LiveDot, FooterLink } from './../components/atoms.jsx';
 import { ShortNewsSection } from './../components/Sections/ShortNewsSection.jsx';
 import { useAuth } from './../contexts/AuthContext.jsx';
 
-function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstituency, userState, onChangeLocation }) {
+function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstituency, userState, onChangeLocation, onSelectLocation }) {
   const { T, isDark, toggleTheme } = useAppTheme();
   // Signed-in user drives the hamburger header. When logged out, show a
   // generic "Guest" prompt instead of stale data.
@@ -963,6 +963,8 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                           setShowDropdown(false);
                           setDropStep('state');
                           setDropState(null);
+                          // Propagate to the app so the choice persists across all pages.
+                          onSelectLocation?.(c.nameEn, c.state);
                         }}
                         style={{
                           display:'flex', alignItems:'center', gap:12,

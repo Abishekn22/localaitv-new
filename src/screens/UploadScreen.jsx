@@ -309,8 +309,8 @@ function UploadScreen({ onNavigate, userProfile, userConstituency, onRequestCame
     <div style={{width:'100%',height:'100%',display:'flex',flexDirection:'column',background:T.bg,overflow:'hidden'}}>
       {/* Header — shows which channel */}
       <div style={{background:`linear-gradient(135deg,${T.red},#7A0010)`,padding:'52px 18px 18px',flexShrink:0,position:'relative'}}>
-        {/* Back arrow — returns to registration page */}
-        <button onClick={()=>onNavigate('uploadregister')} style={{
+        {/* Back arrow — returns to home (upload is reached from the home nav) */}
+        <button onClick={()=>onNavigate('home')} style={{
           position:'absolute',top:52,left:14,zIndex:10,
           background:'rgba(255,255,255,0.22)',border:'none',borderRadius:8,
           width:34,height:34,color:'white',fontSize:18,cursor:'pointer',

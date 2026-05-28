@@ -324,6 +324,7 @@ function App() {
             userConstituency={userConstituency}
             userState={userState}
             onChangeLocation={() => setScreen('location')}
+            onSelectLocation={(c, s) => { setUserConstituency(c); if (s) setUserState(s); persistLocation(c, s); }}
           />
           <ReportSheet
             show={!!reportTarget}

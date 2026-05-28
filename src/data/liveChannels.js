@@ -6,7 +6,7 @@ const YT_CHANNEL_ID  = 'UClB3scGwKSfe3CmLYYFkDoQ'; // @localaitv
 // Per-channel YouTube live video IDs — one for each of the 9 channels (updated 2026-05-13).
 const YT_LIVE_KURNOOL    = 'xoU4MZlsXus';   // Kurnool TV live (updated 2026-05-26 from Mohan)
 const YT_LIVE_GUNTUR     = '1I-ESGwy9fQ';   // Guntur TV live (updated 2026-05-25 from Mohan's URL file)
-const YT_LIVE_NELLORE    = 'LrtdXSpo7Xc';   // Nellore TV live
+const YT_LIVE_NELLORE    = '5n_aru8yQe0';   // Nellore TV live (updated 2026-05-28 from Mohan)
 const YT_LIVE_KAKINADA   = '7qRrHTKP1zk';   // Kakinada TV live
 const YT_LIVE_TIRUPATI   = '0WBJVDnz_fc';   // Tirupati TV live (updated 2026-05-25 from Mohan)
 const YT_LIVE_KHAMMAM    = 'FWilVnvR0Es';   // Khammam TV live

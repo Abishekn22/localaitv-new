@@ -3,9 +3,11 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import BottomNav from './../components/BottomNav.jsx';
 import { LocationPin } from './../components/atoms.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 function LocalScreen({ onNavigate, constituency, onOpenCat }) {
   const { T } = useAppTheme();
+  const { isAuthenticated } = useAuth();
 
   // ── 8 main categories (matching Upload home page) — show local LISTINGS ──
   const tiles = [
@@ -51,30 +53,32 @@ function LocalScreen({ onNavigate, constituency, onOpenCat }) {
               </div>
             </div>
           </div>
-          <button onClick={()=>onNavigate('uploadregister')}
-            onMouseEnter={e=>{
-              e.currentTarget.style.transform='translateY(-2px)';
-              e.currentTarget.style.boxShadow=`0 6px 18px ${T.red}66`;
-              e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
-            }}
-            onMouseLeave={e=>{
-              e.currentTarget.style.transform='translateY(0)';
-              e.currentTarget.style.boxShadow=`0 3px 10px ${T.red}44`;
-              e.currentTarget.style.background=`linear-gradient(135deg,${T.red},#9A0015)`;
-            }}
-            style={{
-              background:`linear-gradient(135deg,${T.red},#9A0015)`,border:'none',borderRadius:12,
-              padding:'10px 14px',color:'white',
-              fontFamily:"'Barlow Condensed',sans-serif",
-              fontWeight:800,fontSize:12,letterSpacing:0.4,cursor:'pointer',
-              boxShadow:`0 3px 10px ${T.red}44`,
-              display:'flex',flexDirection:'column',alignItems:'center',gap:1,flexShrink:0,
-              transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-              lineHeight:1.1,
-            }}>
-            <span style={{fontSize:13}}>📤 Register</span>
-            <span style={{fontSize:10,opacity:0.92,fontWeight:600}}>to Upload</span>
-          </button>
+          {!isAuthenticated && (
+            <button onClick={()=>onNavigate('uploadregister')}
+              onMouseEnter={e=>{
+                e.currentTarget.style.transform='translateY(-2px)';
+                e.currentTarget.style.boxShadow=`0 6px 18px ${T.red}66`;
+                e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
+              }}
+              onMouseLeave={e=>{
+                e.currentTarget.style.transform='translateY(0)';
+                e.currentTarget.style.boxShadow=`0 3px 10px ${T.red}44`;
+                e.currentTarget.style.background=`linear-gradient(135deg,${T.red},#9A0015)`;
+              }}
+              style={{
+                background:`linear-gradient(135deg,${T.red},#9A0015)`,border:'none',borderRadius:12,
+                padding:'10px 14px',color:'white',
+                fontFamily:"'Barlow Condensed',sans-serif",
+                fontWeight:800,fontSize:12,letterSpacing:0.4,cursor:'pointer',
+                boxShadow:`0 3px 10px ${T.red}44`,
+                display:'flex',flexDirection:'column',alignItems:'center',gap:1,flexShrink:0,
+                transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
+                lineHeight:1.1,
+              }}>
+              <span style={{fontSize:13}}>📤 Register</span>
+              <span style={{fontSize:10,opacity:0.92,fontWeight:600}}>to Upload</span>
+            </button>
+          )}
         </div>
       </div>
 
