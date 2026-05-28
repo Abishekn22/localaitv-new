@@ -238,39 +238,12 @@ function App() {
   }
 
   function navigate(to) {
-<<<<<<< Updated upstream
     // Any explicit navigation cancels a pending "return to channel" hand-off.
     setBulletinReturnChannel(null);
-    // Screens that are "downstream" of the Upload home — pressing back from any of these
-    // to 'upload' should go DIRECTLY to the upload home (8 tiles), bypassing registration.
-    // Upload sub-forms that should NOT trigger the registration gate when
-    // their back button calls navigate('upload') — back from any of these
-    // returns the user straight to the upload category grid.
-    const uploadDownstream = [
-      'newsupload', 'birthdayform', 'eventsform', 'upcomingmarriage',
-      'shopping', 'jobs', 'carsales', 'rentalform', 'marriageform',
-      'vegpriceform', 'guestintake',
-      // Newly added categories (Marriage Anniversary, Who is Who, Talent
-      // Show, Public Voice) — back from any of these should also land on
-      // the category grid, not the registration page.
-      'anniversaryform', 'whoiswhoform', 'talentshowform', 'publicvoiceform',
-    ];
-
-    // Show registration page BEFORE upload home, but only when entering from a
-    // non-upload screen (e.g., bottom nav tap from Home / Local / Profile).
-    // From any upload sub-form's back button → skip registration, go straight to upload home.
-    if (
-      to === 'upload' &&
-      screen !== 'uploadregister' &&
-      screen !== 'upload' &&
-      !uploadDownstream.includes(screen)
-    ) {
-=======
     // Upload requires a signed-in user. Guests tapping Upload (bottom nav or
     // sidebar) are sent to the registration / login screen; signed-in users go
     // straight to the upload page.
     if (to === 'upload' && !isAuthenticated) {
->>>>>>> Stashed changes
       setNavActive('upload');
       setSelectedNews(null);
       setSelectedChannel(null);
