@@ -1,27 +1,30 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, filterBulletinsByLocation, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 import Logo from './../components/Logo.jsx';
 
-function BulletinPlayerScreen({ startIdx = 0, onClose }) {
+function BulletinPlayerScreen({ startIdx = 0, onClose, location = null }) {
   const { T } = useAppTheme();
 
   // Pull bulletins from /api/bulletins and map to the legacy shape. Falls
   // back to BULLETINS (currently empty) so the screen never reads undefined.
+  // The backend returns location_id: 0 for every bulletin, so we fetch all
+  // and filter by the selected channel name client-side (see below).
   const { data: liveBulletins, loading: bulletinsLoading } = useAPI(
     () => apiCall(`/bulletins?page=1&limit=50`).then(d => d.items || d),
     BULLETINS,
     []
   );
 
-  // Sort bulletins newest first
+  // Filter to the selected location, then sort newest first.
   const sorted = useMemo(() => {
-    const src = Array.isArray(liveBulletins) && liveBulletins.length > 0
-      ? liveBulletins.map(mapBulletin).filter(Boolean)
+    const filtered = filterBulletinsByLocation(liveBulletins, location || {});
+    const src = Array.isArray(filtered) && filtered.length > 0
+      ? filtered.map(mapBulletin).filter(Boolean)
       : BULLETINS;
     return [...src].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
-  }, [liveBulletins]);
+  }, [liveBulletins, location?.id, location?.name, location?.nameEn]);
 
   // Find the bulletin the user originally tapped (handed off via window)
   const taggedId = (typeof window !== 'undefined') ? window.__bulletinStartId : null;

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, mapBulletin, filterBulletinsByLocation, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
 import { mapIncidentToShort, resolveMediaUrl } from './../data/incidents.js';
+import { getLocationIdFromName } from './../data/regions.js';
 
 import BottomNav from './../components/BottomNav.jsx';
 import ClassifiedsSection from './../components/Sections/ClassifiedsSection.jsx';
@@ -149,25 +150,36 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   // stale data briefly showing during a channel switch.
   const weatherForActive = (weather && weather.city === activeChannel?.nameEn) ? weather : null;
 
+  // The selected channel maps to the backend's numeric locations.id. Bulletins
+  // and incidents are scoped to it so the feeds match the location the user
+  // picked (and refetch when they switch channels). Falls back to the picked
+  // constituency name when no channel object is resolved yet.
+  const activeLocationId = useMemo(
+    () => getLocationIdFromName(activeChannel?.nameEn || displayConstituency, activeChannel?.state || userState),
+    [activeChannel?.nameEn, activeChannel?.state, displayConstituency, userState]
+  );
+  const locParam = activeLocationId != null ? `&location_id=${activeLocationId}` : '';
+
   const { data: liveNews, loading: newsLoading, error: newsError } = useAPI(
     () => apiCall(`/news?constituency=${encodeURIComponent(displayConstituency)}&limit=20`).then(d => d.items || d),
     NEWS_ITEMS,
     [displayConstituency, refreshTick]
   );
   // /api/bulletins — paginated bulletin board (id, title, content, timestamp,
-  // priority_level, image_url, audio_url, video_url). Mapped below into the
-  // legacy rail shape so the existing thumbnail strip renders unchanged.
+  // priority_level, image_url, audio_url, video_url). The backend returns
+  // location_id: 0 for every bulletin, so we fetch all and filter by the
+  // selected channel client-side (see filterBulletinsByLocation / bulletinsToShow).
   const { data: liveBulletins, loading: bulletinsLoading, error: bulletinsError } = useAPI(
-    () => apiCall(`/bulletins?page=1&limit=20`).then(d => d.items || d),
+    () => apiCall(`/bulletins?page=1&limit=50`).then(d => d.items || d),
     BULLETINS,
     [refreshTick]
   );
   // /api/incidents — paginated incident feed (id, title, category, location).
   // Mapped into the SHORT_NEWS shape and passed to <ShortNewsSection items={…} />.
   const { data: liveIncidents, loading: incidentsLoading } = useAPI(
-    () => apiCall(`/incidents?page=1&limit=10`).then(d => d.items || d),
+    () => apiCall(`/incidents?page=1&limit=10${locParam}`).then(d => d.items || d),
     [],
-    [refreshTick]
+    [activeLocationId, refreshTick]
   );
 
   // Incident → SHORT_NEWS shape adapter + media URL resolver are shared
@@ -199,7 +211,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
 
   const newsToShow     = (Array.isArray(liveNews)     && liveNews.length     > 0) ? liveNews     : NEWS_ITEMS;
   const bulletinsToShow= (Array.isArray(liveBulletins) && liveBulletins.length > 0)
-    ? liveBulletins.map(mapBulletin)
+    ? filterBulletinsByLocation(liveBulletins, { id: activeLocationId, name: activeChannel?.name, nameEn: activeChannel?.nameEn }).map(mapBulletin)
     : BULLETINS;
   const incidentShorts = (Array.isArray(liveIncidents) && liveIncidents.length > 0)
     ? liveIncidents.map(mapIncidentToShort)

@@ -5,6 +5,35 @@ const BULLETINS = [];
 
 export { BULLETINS };
 
+// Match bulletins to the selected location. Priority:
+//   1. location_id — authoritative, but only when the bulletin actually carries
+//      a real one (> 0). Today the backend returns location_id: 0 for every
+//      bulletin, so this branch is skipped until that data is populated.
+//   2. name — fallback for items with no usable id. The location lives in the
+//      Telugu title ("వరంగల్ వార్త బులెటిన్స్ | …") and the English video_url
+//      path (".../bulletins/Warangal/…").
+// `loc` = { id: numeric locations.id, name: Telugu, nameEn: English }.
+export function filterBulletinsByLocation(items, loc = {}) {
+  if (!Array.isArray(items)) return items;
+  const id = loc.id != null && loc.id !== '' ? Number(loc.id) : null;
+  const te = String(loc.name || '').trim();
+  const en = String(loc.nameEn || '').trim().toLowerCase();
+  if (id == null && !te && !en) return items;
+  return items.filter(b => {
+    // Priority 1 — trust a real numeric id when the bulletin has one.
+    const bid = Number(b?.location_id);
+    if (Number.isFinite(bid) && bid > 0) {
+      return id != null && bid === id;
+    }
+    // Priority 2 — id is 0 / missing, so match by name instead.
+    const title = String(b?.title || b?.titleTe || b?.titleEn || '');
+    const url   = String(b?.video_url || b?.videoUrl || '').toLowerCase();
+    if (te && title.includes(te)) return true;
+    if (en && url.includes(en)) return true;
+    return false;
+  });
+}
+
 // "9:30 PM" / "10:45 AM" from an ISO timestamp
 export function formatBulletinTime(iso) {
   if (!iso) return '';

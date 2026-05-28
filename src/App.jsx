@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   T, useAppTheme, ThemeProvider,
-  SHORT_NEWS, CLASSIFIEDS,
+  SHORT_NEWS, CLASSIFIEDS, LIVE_CHANNELS,
   apiCall, useAPI,
 } from './_imports.js';
 
 import { publicVoiceToShortShape } from './components/Sections/ShortNewsSection.jsx';
 import { mapIncidentToShort } from './data/incidents.js';
+import { getLocationIdFromName } from './data/regions.js';
 
 // Screens
 import SplashScreen           from './screens/SplashScreen.jsx';
@@ -86,11 +87,12 @@ import { AuthProvider } from './contexts/AuthContext.jsx';
 // /api/incidents fetch; the fetch never runs when the user isn't on
 // the route. KurnoolShortsScreen now handles an empty feed with a
 // bilingual placeholder so a slow / empty API response no longer crashes.
-function ShortsFeedRoute({ onClose }) {
+function ShortsFeedRoute({ onClose, locationId = null }) {
+  const locParam = locationId != null ? `&location_id=${locationId}` : '';
   const { data: liveIncidents } = useAPI(
-    () => apiCall(`/incidents?page=1&limit=20`).then(d => d.items || d),
+    () => apiCall(`/incidents?page=1&limit=20${locParam}`).then(d => d.items || d),
     [],
-    []
+    [locationId]
   );
   const items = useMemo(
     () => (Array.isArray(liveIncidents) ? liveIncidents.map(mapIncidentToShort) : []),
@@ -151,6 +153,14 @@ function App() {
   const [userConstituency, setUserConstituency] = useState(__init.constituency || null);
   const [classifiedsCat, setClassifiedsCat] = useState('All'); // initial category for ClassifiedsScreen
   const [userState,        setUserState]        = useState(__init.state || null);
+
+  // Selected constituency → backend numeric locations.id. Passed to the
+  // standalone shorts route (incidents carry a real location_id).
+  const activeLocationId = getLocationIdFromName(userConstituency, userState);
+  // Bulletins carry location_id: 0, so the bulletin player filters by name
+  // instead — pass both the Telugu (channel.name) and English (nameEn) labels.
+  const __activeChannelObj = LIVE_CHANNELS.find(c => c.nameEn === userConstituency) || null;
+  const activeLocation = { id: activeLocationId, name: __activeChannelObj?.name || '', nameEn: userConstituency || '' };
 
   // Write helper — every place that updates the chosen location must also
   // persist it, so the next launch can skip the picker.
@@ -374,7 +384,7 @@ function App() {
         </div>
       );
       case 'local':      return <LocalScreen onNavigate={navigate} constituency={userConstituency||'Kurnool'} onOpenCat={(c)=>{setClassifiedsCat(c); navigate('classifiedsfeed');}} />;
-      case 'shortsfeed':      return <ShortsFeedRoute onClose={()=>navigate('home')} />;
+      case 'shortsfeed':      return <ShortsFeedRoute onClose={()=>navigate('home')} locationId={activeLocationId} />;
       case 'publicvoicefeed': {
         // Public Voice opens in the Mana Kurnool Shorts viewer with
         // pv-items mapped to the SHORT_NEWS shape. ONLY uploaded form
@@ -422,7 +432,7 @@ function App() {
         }
         return <ClassifiedsFeedScreen onClose={()=>navigate('home')} startIdx={startIdx} startCat={preset || 'All'}/>;
       }
-      case 'bulletinsfeed': return <BulletinPlayerScreen startIdx={0} onClose={()=>navigate('home')} />;
+      case 'bulletinsfeed': return <BulletinPlayerScreen startIdx={0} onClose={()=>navigate('home')} location={activeLocation} />;
       case 'newsfeed':        return <DistrictNewsFeedScreen onClose={()=>navigate('home')} startCat='All' startIdx={0}/>;  
       case 'whoswho':    return <WhosWhoScreen onBack={()=>navigate('local')} onNavigate={navigate} constituency={userConstituency||'Kurnool'} />;
       case 'utility':    return <UtilityScreen onBack={()=>navigate('local')} onNavigate={navigate} constituency={userConstituency||'Kurnool'} />;
