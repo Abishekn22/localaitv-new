@@ -81,7 +81,7 @@ import ReportSheet     from './components/sheets/ReportSheet.jsx';
 import PermissionSheet from './components/sheets/PermissionSheet.jsx';
 import Toast           from './components/Toast.jsx';
 
-import { AuthProvider } from './contexts/AuthContext.jsx';
+import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 
 // Lazy wrapper for the 'shortsfeed' route. Mounting this fires the
 // /api/incidents fetch; the fetch never runs when the user isn't on
@@ -106,6 +106,9 @@ function App() {
   // Phase 1: T is still the global dark object. Phase 2+ will
   // destructure T from here so components pick up light values.
   const { isDark: appIsDark } = useAppTheme();
+  // Auth gate — logged-in users go straight to the upload page; guests are
+  // routed to the registration / login screen first.
+  const { isAuthenticated } = useAuth();
 
   // ── Onboarding persistence ──────────────────────────────────
   // First launch: no localaitv_device_id → mint a UUID, store it, and
@@ -235,6 +238,7 @@ function App() {
   }
 
   function navigate(to) {
+<<<<<<< Updated upstream
     // Any explicit navigation cancels a pending "return to channel" hand-off.
     setBulletinReturnChannel(null);
     // Screens that are "downstream" of the Upload home — pressing back from any of these
@@ -261,10 +265,16 @@ function App() {
       screen !== 'upload' &&
       !uploadDownstream.includes(screen)
     ) {
+=======
+    // Upload requires a signed-in user. Guests tapping Upload (bottom nav or
+    // sidebar) are sent to the registration / login screen; signed-in users go
+    // straight to the upload page.
+    if (to === 'upload' && !isAuthenticated) {
+>>>>>>> Stashed changes
       setNavActive('upload');
-      setScreen('uploadregister');
       setSelectedNews(null);
       setSelectedChannel(null);
+      setScreen('uploadregister');
       return;
     }
     setNavActive(to);

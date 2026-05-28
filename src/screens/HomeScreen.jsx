@@ -26,6 +26,18 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   const { user, isAuthenticated, logout } = useAuth();
   const displayName   = isAuthenticated ? (user?.name || 'User') : 'Guest';
   const avatarInitial = (displayName.trim().charAt(0) || 'G').toUpperCase();
+  // Resolve the signed-in user's profile photo (same rules as the Profile page).
+  const profilePhotoUrl = useMemo(() => {
+    if (!isAuthenticated) return '';
+    const raw = user?.profile_picture || user?.profile_photo || user?.profilePhoto || user?.photo || user?.avatar || '';
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    const host = API_BASE.replace(/\/api\/?$/, '');
+    let path = String(raw).trim();
+    if (path.startsWith('/api/')) path = path.slice(4);
+    if (!path.startsWith('/')) path = '/' + path;
+    return host + path;
+  }, [user, isAuthenticated]);
   // Resolve the live channel from the constituency the user picked in the
   // onboarding LocationPicker (userConstituency = LIVE_CHANNELS[].nameEn, e.g. "Tirupati").
   // Falls back to the first channel only when there is no match (e.g. not yet picked).
@@ -566,16 +578,20 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               display:'flex', alignItems:'center', gap:12,
               flexShrink:0,
             }}>
-              {/* Avatar circle with initial */}
+              {/* Avatar circle — profile photo when available, else initial */}
               <div style={{
                 width:48, height:48, borderRadius:'50%',
                 background:'#FFFFFF',
                 display:'flex', alignItems:'center', justifyContent:'center',
                 fontFamily:"'Barlow Condensed',sans-serif",
                 fontWeight:900, fontSize:22, color:'#D0021B',
-                flexShrink:0,
+                flexShrink:0, overflow:'hidden',
                 boxShadow:'0 2px 8px rgba(0,0,0,0.15)',
-              }}>{avatarInitial}</div>
+              }}>
+                {profilePhotoUrl
+                  ? <img src={profilePhotoUrl} alt={displayName} style={{width:'100%',height:'100%',objectFit:'cover'}} onError={e=>{e.currentTarget.style.display='none';}}/>
+                  : avatarInitial}
+              </div>
               {/* Name */}
               <div style={{flex:1, minWidth:0}}>
                 <div style={{

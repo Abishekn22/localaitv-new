@@ -2,79 +2,105 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
 import BottomNav from './../components/BottomNav.jsx';
+import RegRow from './../components/RegRow.jsx';
 import { LocationPin } from './../components/atoms.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { getLocationIdFromName } from '../data/regions.js';
+
+// Dev bypass — this number skips OTP and signs in directly via auth-by-phone.
+// Remove before production.
+const TEST_PHONE = '9876543211';
+
+// Resolve a constituency English name → numeric backend locations.id. The
+// constituency list uses a few "City"/"Urban"/… suffixed names that don't have
+// an exact row in channels.js (e.g. "Kakinada City" vs "Kakinada"), so retry
+// with the suffix stripped before giving up.
+function resolveLocationId(en, st) {
+  if (!en) return null;
+  let id = getLocationIdFromName(en, st);
+  if (id == null) id = getLocationIdFromName(en.replace(/ (City|Urban|Rural|East|West)$/i, ''), st);
+  return id;
+}
 
 function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, userState, onSubmitDone }) {
   const { T } = useAppTheme();
   const { setSession } = useAuth();
 
-  const [state, setState] = useState(userState || '');
-  const [constituency, setConstituency] = useState(userConstituency || '');
-  const [name, setName] = useState(userProfile?.name || '');
+  // 1 = Verify Mobile (OTP) · 2 = Your Profile (name + constituency)
+  const [step, setStep] = useState(1);
+
+  // ── Step 1 state — mobile + OTP ──
   const [mobile, setMobile] = useState(userProfile?.mobile || '');
   const [otp, setOtp] = useState('');
-  const [otpRequested, setOtpRequested] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
+  const [phoneChecking, setPhoneChecking] = useState(false);
+  const [phoneMsg, setPhoneMsg] = useState('');
+  const [phoneMsgType, setPhoneMsgType] = useState('');      // new | existing | checking | error
+  const [otpMsg, setOtpMsg] = useState('');
+  const [otpMsgType, setOtpMsgType] = useState('');          // available | checking | error
+
+  // ── Step 2 state — profile ──
+  const [name, setName] = useState(userProfile?.name || '');
+  // No location is auto-selected — the user must explicitly pick one.
+  const [state, setState] = useState('');
+  const [constituency, setConstituency] = useState('');
+  const [search, setSearch] = useState('');
   const [photo, setPhoto] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(userProfile?.photo || null);
   const [showCamera, setShowCamera] = useState(false);
-  const [showChannelDropdown, setShowChannelDropdown] = useState(false);
-  const [dropStep, setDropStep] = useState('state');   // 'state' | 'constituency' — same as home page
-  const [dropState, setDropState] = useState(null);    // 'AP' | 'TG'
-  const [phoneChecking, setPhoneChecking] = useState(false);
-  const [phoneMsg, setPhoneMsg] = useState('');
-  const [phoneMsgType, setPhoneMsgType] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [otpSending, setOtpSending] = useState(false);
-  const [otpMsg, setOtpMsg] = useState('');
-  const [otpMsgType, setOtpMsgType] = useState('');
   const [uploadedPhotoPath, setUploadedPhotoPath] = useState(userProfile?.profile_photo || '');
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
 
-  // Static KYC video path — KYC video step is skipped per spec
+  // KYC video step is skipped per spec — a static path is sent on register.
   const STATIC_KYC_VIDEO_PATH = '/uploads/kyc/static-kyc-video.mp4';
 
-  const checkPhoneApi = async (phoneNumber) => {
-    if (!phoneNumber || !/^[6-9]\d{9}$/.test(phoneNumber)) {
-      return { isAvailable: false, message: 'Please enter a valid 10-digit Indian phone number' };
-    }
-    try {
-      const response = await fetch(`${API_BASE}/auth/check-phone`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ phone: phoneNumber.trim() }),
-        credentials: 'include'
-      });
-      let responseData;
-      try {
-        responseData = await response.json();
-      } catch (parseErr) {
-        const responseText = await response.text();
-        return { isAvailable: false, message: 'Unable to validate phone number. Please try again.', error: 'Invalid server response format' };
-      }
-      const phoneExists = response.ok && responseData && responseData.registered === true;
-      if (phoneExists) {
-        return { isAvailable: false, message: 'This phone number is already registered. Please sign in to your existing account or use a different number.' };
-      }
-      return { isAvailable: true, message: 'Phone number is available for registration' };
-    } catch (networkError) {
-      return { isAvailable: false, message: 'Network error while checking phone number. Please check your connection and try again.', error: networkError.message };
-    }
+  const validMobile = /^[6-9]\d{9}$/.test(mobile);
+
+  // ── API helpers — single /api (API_BASE already ends in /api) ──
+  const checkRegistered = async (phoneNumber) => {
+    const response = await fetch(`${API_BASE}/auth/check-phone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ phone: phoneNumber.trim() }),
+      credentials: 'include',
+    });
+    const data = await response.json().catch(() => null);
+    return !!(response.ok && data && data.registered === true);
   };
 
-  const sendOtpApi = async (phoneNumber, otp) => {
+  const sendOtpApi = async (phoneNumber, otpCode) => {
     try {
       const response = await fetch(`${API_BASE}/auth/send-otp-proxy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ phone: phoneNumber.trim(), otp }),
+        body: JSON.stringify({ phone: phoneNumber.trim(), otp: otpCode }),
         credentials: 'include',
       });
       if (!response.ok) return { ok: false, message: `Failed to send OTP (${response.status})` };
       return { ok: true };
     } catch (e) {
       return { ok: false, message: 'Network error while sending OTP. Please try again.' };
+    }
+  };
+
+  const authByPhoneApi = async (phoneNumber) => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/auth-by-phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber.trim() }),
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data && data.token) return { ok: true, token: data.token, user: data.user };
+      return { ok: false, message: (data && data.message) || 'Sign-in failed.' };
+    } catch (e) {
+      return { ok: false, message: 'Network error during sign-in.' };
     }
   };
 
@@ -116,49 +142,68 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
     }
   };
 
+  // Debounced phone lookup — informational only (a registered number signs in,
+  // a new number registers; neither blocks the OTP step).
   useEffect(() => {
-    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
-      setPhoneMsg('');
-      setPhoneMsgType('');
-      return;
-    }
+    if (!validMobile) { setPhoneMsg(''); setPhoneMsgType(''); return; }
     setPhoneMsg('Checking…');
     setPhoneMsgType('checking');
     setPhoneChecking(true);
     const timer = setTimeout(async () => {
-      const result = await checkPhoneApi(mobile);
-      setPhoneChecking(false);
-      setPhoneMsg(result.message);
-      if (result.isAvailable) {
-        setPhoneMsgType('available');
-      } else if (result.message.includes('already registered')) {
-        setPhoneMsgType('taken');
-      } else {
+      try {
+        const registered = await checkRegistered(mobile);
+        setPhoneMsg(registered
+          ? 'Existing account — verify OTP to sign in.'
+          : 'New number — verify OTP to register.');
+        setPhoneMsgType(registered ? 'existing' : 'new');
+      } catch {
+        setPhoneMsg('Could not verify number. You can still continue.');
         setPhoneMsgType('error');
+      } finally {
+        setPhoneChecking(false);
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [mobile]);
+  }, [mobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Find selected channel object from LIVE_CHANNELS (matches the home page exactly)
-  const selectedChannel = LIVE_CHANNELS.find(ch => ch.nameEn === constituency);
+  // Resend cooldown countdown.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setInterval(() => setResendIn(s => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, [resendIn]);
 
-  const constituencyList = state === 'AP' ? AP_CONSTITUENCIES
-    : state === 'TG' ? TG_CONSTITUENCIES
-    : [];
+  // Best-effort SMS OTP autofill (Chrome / Android). Silently ignored elsewhere.
+  useEffect(() => {
+    if (!otpSent) return;
+    if (typeof window === 'undefined' || !('OTPCredential' in window)) return;
+    const ac = new AbortController();
+    navigator.credentials.get({ otp: { transport: ['sms'] }, signal: ac.signal })
+      .then(c => { if (c && c.code) setOtp(String(c.code).replace(/\D/g, '').slice(0, 4)); })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [otpSent]);
 
-  async function handleRequestOTP() {
-    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
-      setOtpMsg('Enter a valid 10-digit mobile number first.');
-      setOtpMsgType('error');
+  function loginAndExit(res) {
+    setSession({ token: res.token, user: res.user });
+    onSubmitDone({ name: res.user?.name || name || '', mobile, token: res.token, user: res.user });
+  }
+
+  async function handleSendOtp() {
+    setOtpMsg(''); setOtpMsgType('');
+    if (!validMobile) { setOtpMsg('Enter a valid 10-digit mobile number.'); setOtpMsgType('error'); return; }
+
+    // Dev bypass — skip OTP entirely.
+    if (mobile === TEST_PHONE) {
+      setOtpSending(true);
+      const res = await authByPhoneApi(mobile);
+      setOtpSending(false);
+      if (res.ok) loginAndExit(res);
+      else { setOtpMsg(res.message); setOtpMsgType('error'); }
       return;
     }
-    if (phoneMsgType === 'taken') {
-      setOtpMsg('This number is already registered.');
-      setOtpMsgType('error');
-      return;
-    }
-    const newOtp = String(Math.floor(1000 + Math.random() * 9000));
+
+    const newOtp = String(Math.floor(1000 + Math.random() * 9000)); // 4-digit
     setOtpSending(true);
     setOtpMsg('Sending OTP…');
     setOtpMsgType('checking');
@@ -166,7 +211,9 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
     setOtpSending(false);
     if (result.ok) {
       setGeneratedOtp(newOtp);
-      setOtpRequested(true);
+      setOtp('');
+      setOtpSent(true);
+      setResendIn(30);
       setOtpMsg(`OTP sent to +91 ${mobile}.`);
       setOtpMsgType('available');
     } else {
@@ -175,526 +222,386 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
     }
   }
 
-  async function handleSubmit() {
-    if (submitting) return;
-    // OTP is optional; verify only if user entered one
-    if (otpRequested && otp && generatedOtp && otp !== generatedOtp) {
-      setSubmitMsg('OTP does not match. Please re-check or resend.');
+  async function handleVerifyOtp() {
+    setOtpMsg(''); setOtpMsgType('');
+    if (mobile === TEST_PHONE) return handleSendOtp();
+    if (!otp || otp.length < 4 || otp !== generatedOtp) {
+      setOtpMsg('OTP does not match. Please re-check or resend.');
+      setOtpMsgType('error');
       return;
     }
+    setVerifying(true);
+    let registered = false;
+    try { registered = await checkRegistered(mobile); } catch { registered = false; }
+    if (registered) {
+      // Existing user → sign in, skip the profile step.
+      const res = await authByPhoneApi(mobile);
+      setVerifying(false);
+      if (!res.ok) { setOtpMsg(res.message); setOtpMsgType('error'); return; }
+      loginAndExit(res);
+      return;
+    }
+    // New user → collect profile.
+    setVerifying(false);
+    setStep(2);
+  }
+
+  async function handleSubmitProfile() {
+    if (submitting) return;
+    if (!name.trim()) { setSubmitMsg('Please enter your name.'); return; }
+    if (!constituency) { setSubmitMsg('Please select your constituency.'); return; }
     setSubmitting(true);
     setSubmitMsg('');
 
-    // 1) Upload profile photo if a new file was selected
+    // 1) Upload profile photo if a new file was chosen.
     let profilePhotoPath = uploadedPhotoPath;
     if (photo) {
       setSubmitMsg('Uploading profile photo…');
       const up = await uploadPhotoApi(photo);
-      if (!up.ok) {
-        setSubmitting(false);
-        setSubmitMsg(up.message || 'Photo upload failed.');
-        return;
-      }
+      if (!up.ok) { setSubmitting(false); setSubmitMsg(up.message || 'Photo upload failed.'); return; }
       profilePhotoPath = up.path;
       setUploadedPhotoPath(up.path);
     }
 
-    // 2) Register — resolve location_id to the numeric DB id from CHANNELS_AP/TG
-    //    (LIVE_CHANNELS only carries the dropdown's string code; the backend wants
-    //    the locations table id, which lives on the matching CHANNELS_AP/TG entry.)
-    const dbChannel = [...CHANNELS_AP, ...CHANNELS_TG].find(c => c.name === constituency);
+    // 2) Register.
     setSubmitMsg('Submitting registration…');
     const payload = {
-      name: (name || '').trim(),
-      phone: (mobile || '').trim(),
-      location_id: dbChannel ? dbChannel.id : null,
+      name: name.trim(),
+      phone: mobile.trim(),
+      location_id: resolveLocationId(constituency, state),
       kyc_video: STATIC_KYC_VIDEO_PATH,
       profile_photo: profilePhotoPath,
     };
     const reg = await registerApi(payload);
     setSubmitting(false);
-    if (!reg.ok) {
-      setSubmitMsg(reg.message || 'Registration failed.');
-      return;
-    }
-    // Persist the new session so ProfileScreen + the rest of the app see the user.
+    if (!reg.ok) { setSubmitMsg(reg.message || 'Registration failed.'); return; }
     setSession({ token: reg.token, user: reg.user });
     setSubmitMsg('');
     onSubmitDone({
       state, constituency, name, mobile, photo,
-      profile_photo: profilePhotoPath,
-      token: reg.token,
-      user: reg.user,
+      profile_photo: profilePhotoPath, token: reg.token, user: reg.user,
     });
   }
 
+  // ── Step 2 constituency list (LIVE on top, then Launching soon) ──
+  // The LIVE section is sourced from LIVE_CHANNELS — the exact set already
+  // streaming on the home page (both AP + TG) — so it always matches what's
+  // live there, regardless of the constituency list's own flags. With no state
+  // chosen, all live channels (both states) are shown; the toggle narrows them.
+  const liveIds = useMemo(
+    () => new Set(LIVE_CHANNELS.map(c => getLocationIdFromName(c.nameEn, c.state)).filter(x => x != null)),
+    []
+  );
+  const liveAll = useMemo(
+    () => LIVE_CHANNELS.map(c => ({ te: c.name, en: c.nameEn, live: true, state: c.state })),
+    []
+  );
+  // Launching-soon = id-mapped constituencies (minus the live ones), per state.
+  const buildRest = (src, st) => src
+    .map(c => ({ te: c.te, en: c.en, live: false, state: st, id: resolveLocationId(c.en, st) }))
+    .filter(c => c.id != null && !liveIds.has(c.id));
+  const restAP = useMemo(() => buildRest(AP_CONSTITUENCIES, 'AP'), [liveIds]);
+  const restTG = useMemo(() => buildRest(TG_CONSTITUENCIES, 'TG'), [liveIds]);
+
+  // Selecting a location also reflects its state in the toggle.
+  const selectLocation = (c) => {
+    setConstituency(c.en);
+    if (c.state) setState(c.state);
+    setSearch('');
+  };
+
+  const q = search.trim().toLowerCase();
+  const matchesSearch = (c) => c.en.toLowerCase().includes(q) || (c.te && c.te.includes(search.trim()));
+
+  const liveSource = state ? liveAll.filter(c => c.state === state) : liveAll;
+  const otherSource = state === 'AP' ? restAP
+    : state === 'TG' ? restTG
+    : [...restAP, ...restTG];
+  const liveItems = q ? liveSource.filter(matchesSearch) : liveSource;
+  const otherItems = (q ? otherSource.filter(matchesSearch) : otherSource)
+    .slice().sort((a, b) => a.en.localeCompare(b.en));
+  const noMatches = liveItems.length === 0 && otherItems.length === 0;
+
+  const labelStyle = {
+    fontSize: 11, color: T.textMuted, marginBottom: 6,
+    textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700,
+  };
+
   return (
-    <div style={{width:'100%',height:'100%',background:T.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+    <div style={{ width: '100%', height: '100%', background: T.bg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ── Header ── */}
+      <div style={{ background: T.bg2, padding: '46px 16px 16px', flexShrink: 0 }}>
+        {/* Top row: back button + context banner side-by-side (no overlap) */}
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, marginBottom: 14 }}>
+          <button onClick={() => (step === 2 ? setStep(1) : onNavigate('home'))}
+            aria-label="Back"
+            style={{
+              width: 36, height: 36, borderRadius: 9, flexShrink: 0, alignSelf: 'flex-start',
+              background: T.bg3, border: `1px solid ${T.border}`, color: T.text, fontSize: 18,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>←</button>
 
-      {/* ── Red header (matches Upload home red gradient) ── */}
-      <div style={{
-        background:'linear-gradient(135deg,#D0021B 0%,#9A0015 60%,#7A0010 100%)',
-        padding:'48px 18px 20px',flexShrink:0,position:'relative',
-        boxShadow:'0 4px 18px rgba(208,2,27,0.25)',overflow:'hidden',
-      }}>
-        <div style={{position:'absolute',top:-30,right:-30,width:140,height:140,
-          borderRadius:'50%',background:'radial-gradient(circle,rgba(255,255,255,0.14),transparent 70%)',
-          pointerEvents:'none'}}/>
-
-        <button onClick={()=>onNavigate('home')} style={{
-          position:'absolute',top:52,left:14,zIndex:10,
-          background:'rgba(255,255,255,0.22)',border:'none',borderRadius:8,
-          width:34,height:34,color:'white',fontSize:18,cursor:'pointer',
-          display:'flex',alignItems:'center',justifyContent:'center',
-        }}>←</button>
-
-        <div style={{textAlign:'center',position:'relative',zIndex:1,padding:'0 40px'}}>
-          <div style={{fontSize:32,marginBottom:4}}>📝</div>
-          <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:900,fontSize:18,
-            color:'white',lineHeight:1.3,textShadow:'0 1px 3px rgba(0,0,0,0.25)'}}>
-            వార్తలు / సమాచారం అప్‌లోడ్ చేయడానికి నమోదు ఫారం
+          {/* Context banner */}
+          <div style={{ flex: 1, minWidth: 0, background: 'rgba(208,2,27,0.12)', border: `1px solid rgba(208,2,27,0.3)`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14 }}>🔒</span>
+            <span style={{ fontSize: 11, color: T.text, lineHeight: 1.4, flex: 1 }}>
+              <strong style={{ color: T.red }}>Registration required.</strong> Only verified citizens can post news on LocalAI TV.
+            </span>
           </div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:600,fontSize:12,
-            color:'rgba(255,255,255,0.9)',letterSpacing:0.4,marginTop:4,lineHeight:1.3}}>
-            Registration Form for Uploading News / Information
-          </div>
+        </div>
+
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 22, letterSpacing: 1, color: T.text }}>
+          {step === 1 ? '📱 Verify Mobile' : '👤 Your Profile'}
+        </div>
+        <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>
+          {step === 1 ? 'OTP verification is mandatory to upload news' : 'Complete your profile to get started'}
+        </div>
+
+        {/* Progress dots */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+          {[1, 2].map(s => (
+            <div key={s} style={{ height: 3, flex: 1, borderRadius: 2, background: s <= step ? T.red : 'rgba(150,150,150,0.25)', transition: 'background 0.3s' }} />
+          ))}
         </div>
       </div>
 
-      {/* ── Scrollable body ── */}
-      <div style={{flex:1,overflowY:'auto',padding:'16px 16px 140px'}}>
-
-        {/* Registration process note */}
-        <div style={{
-          background:`linear-gradient(135deg,rgba(0,208,104,0.08),rgba(43,127,255,0.06))`,
-          border:`1px solid rgba(0,208,104,0.25)`,
-          borderRadius:14,padding:'12px 16px',marginBottom:14,
-          display:'flex',alignItems:'center',gap:10,
-        }}>
-          <span style={{fontSize:24,flexShrink:0}}>✅</span>
-          <div>
-            <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:14,
-              color:T.text,lineHeight:1.35}}>
-              ఒక్క పేజీలో నమోదు ప్రక్రియ
-            </div>
-            <div style={{fontSize:11,color:T.textMuted,marginTop:2,lineHeight:1.4}}>
-              Registration Process in One Page
-            </div>
-          </div>
-        </div>
-
-        {/* Form card */}
-        <div style={{
-          background:T.bg2,borderRadius:14,padding:'16px',marginBottom:14,
-          border:`1px solid ${T.border}`,boxShadow:T.isDark?'none':`0 2px 8px ${T.shadow}`,
-        }}>
-
-          {/* ── Location picker — EXACT same box as Home page topbar ── */}
-          <div style={{marginBottom:14}}>
-            <div style={{marginBottom:8}}>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:T.text,letterSpacing:0.3,lineHeight:1.2}}>
-                Select Your Town / Constituency
+      {/* ── Body ── */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 18px 120px' }}>
+        {step === 1 ? (
+          /* ════ STEP 1 — VERIFY MOBILE ════ */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Mobile number */}
+            <div>
+              <div style={labelStyle}>Mobile Number *</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ background: T.bg3, borderRadius: 10, padding: '12px', fontSize: 14, color: T.textMuted, flexShrink: 0, border: `1px solid ${T.border}` }}>+91</div>
+                <input value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="Enter 10-digit number" type="tel" inputMode="numeric" maxLength={10}
+                  style={{ flex: 1, background: T.bg3, borderRadius: 10, padding: '12px', fontSize: 14, color: T.text, border: `1px solid ${T.border}`, outline: 'none', boxSizing: 'border-box' }} />
               </div>
+              {phoneMsg && (
+                <div style={{ marginTop: 8, fontSize: 11, padding: '8px 12px', borderRadius: 8,
+                  color: phoneMsgType === 'new' ? '#00C85A' : phoneMsgType === 'existing' ? '#2B7FFF' : phoneMsgType === 'checking' ? T.textMuted : '#D0021B',
+                  background: phoneMsgType === 'new' ? 'rgba(0,200,90,0.1)' : phoneMsgType === 'existing' ? 'rgba(43,127,255,0.1)' : phoneMsgType === 'checking' ? 'rgba(150,150,150,0.08)' : 'rgba(208,2,27,0.1)',
+                  border: `1px solid ${phoneMsgType === 'new' ? 'rgba(0,200,90,0.3)' : phoneMsgType === 'existing' ? 'rgba(43,127,255,0.3)' : phoneMsgType === 'checking' ? 'rgba(150,150,150,0.15)' : 'rgba(208,2,27,0.33)'}` }}>
+                  {phoneMsg}
+                </div>
+              )}
             </div>
 
-            {/* Home-page style: red pin + custom pill dropdown */}
-            <div style={{display:'flex',alignItems:'center',gap:10,position:'relative'}}>
-              {/* Red location pin SVG */}
-              <div style={{flexShrink:0}}>
-                <LocationPin size={22}/>
-              </div>
-
-              {/* Custom pill — matches home page exactly */}
-              <div style={{flex:1,position:'relative'}} onClick={()=>setShowChannelDropdown(v=>!v)}>
-                <div style={{
-                  display:'flex', alignItems:'center', gap:6,
-                  background:T.bg3,
-                  border:`1.5px solid ${showChannelDropdown?'rgba(208,2,27,0.5)':T.border}`,
-                  borderRadius:10,
-                  padding:'8px 12px',
-                  cursor:'pointer',
-                  transition:'border 0.15s',
-                  boxShadow: showChannelDropdown?'0 0 10px rgba(208,2,27,0.15)':'none',
+            {!otpSent ? (
+              <button onClick={handleSendOtp}
+                disabled={otpSending || phoneChecking || !validMobile}
+                style={{
+                  background: (otpSending || phoneChecking || !validMobile) ? T.gray3 : `linear-gradient(135deg,${T.red},#9A0015)`,
+                  color: '#fff', border: 'none', borderRadius: 12, padding: '14px',
+                  fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 17, letterSpacing: 2,
+                  cursor: (otpSending || phoneChecking || !validMobile) ? 'not-allowed' : 'pointer',
+                  opacity: (otpSending || phoneChecking || !validMobile) ? 0.6 : 1,
+                  boxShadow: (otpSending || phoneChecking || !validMobile) ? 'none' : `0 6px 20px ${T.red}44`,
                 }}>
-                  {/* Live dot — green blinking */}
-                  <div style={{width:7,height:7,borderRadius:'50%',background:'#00C85A',
-                    animation:'blink 1s infinite',boxShadow:'0 0 5px #00C85A',flexShrink:0}}/>
-                  {/* Channel name in Telugu (or placeholder) */}
-                  <span style={{
-                    fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",
-                    fontWeight:700, fontSize:14, lineHeight:1.4,
-                    color: selectedChannel ? T.text : T.textMuted, flex:1,
-                  }}>{selectedChannel ? selectedChannel.name : 'Select Your Town / Constituency'}</span>
-                  {/* TV label — only when selected */}
-                  {selectedChannel && (
-                    <span style={{
-                      fontFamily:"'Barlow Condensed',sans-serif",
-                      fontWeight:800, fontSize:10,
-                      color:T.textMuted, letterSpacing:0.5,
-                    }}>TV</span>
-                  )}
-                  {/* Chevron */}
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none"
-                    stroke={T.textMuted} strokeWidth={2.5} strokeLinecap="round">
-                    <polyline points={showChannelDropdown?"18 15 12 9 6 15":"6 9 12 15 18 9"}/>
-                  </svg>
+                {otpSending ? 'SENDING…' : 'SEND OTP'}
+              </button>
+            ) : (
+              <>
+                {/* OTP field + Auto-detect badge */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ ...labelStyle, marginBottom: 0 }}>Enter OTP *</div>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#00C85A', background: 'rgba(0,200,90,0.12)', border: '1px solid rgba(0,200,90,0.3)', borderRadius: 20, padding: '3px 9px' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00C85A' }} />
+                      Auto-detect
+                    </span>
+                  </div>
+                  <input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="• • • •" type="tel" inputMode="numeric" maxLength={4}
+                    autoComplete="one-time-code"
+                    style={{ width: '100%', background: T.bg3, borderRadius: 10, padding: '14px', fontSize: 22, color: T.text, border: `1px solid ${T.red}55`, letterSpacing: 12, textAlign: 'center', outline: 'none', boxSizing: 'border-box', fontWeight: 700 }} />
                 </div>
 
-                {/* ── 2-step Hierarchical Dropdown — identical to Home page ── */}
-                {showChannelDropdown && (
-                  <div style={{
-                    position:'absolute', top:'calc(100% + 6px)', left:0, right:0,
-                    background:T.bg2,
-                    borderRadius:16,
-                    border:`1px solid ${T.border}`,
-                    boxShadow:`0 10px 40px rgba(0,0,0,0.28)`,
-                    overflow:'hidden',
-                    zIndex:200,
-                  }} onClick={e=>e.stopPropagation()}>
+                <button onClick={handleVerifyOtp} disabled={verifying}
+                  style={{
+                    background: verifying ? T.gray3 : `linear-gradient(135deg,${T.green},#009940)`,
+                    color: '#fff', border: 'none', borderRadius: 12, padding: '14px',
+                    fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 17, letterSpacing: 2,
+                    cursor: verifying ? 'not-allowed' : 'pointer',
+                    boxShadow: verifying ? 'none' : `0 6px 20px ${T.green}44`,
+                  }}>
+                  {verifying ? 'VERIFYING…' : '✅ VERIFY OTP'}
+                </button>
 
-                    {/* ── STEP 1: Select State ── */}
-                    {dropStep === 'state' && (
-                      <>
-                        <div style={{
-                          padding:'12px 16px 10px',
-                          borderBottom:`1px solid ${T.border}`,
-                          background: T.isDark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.02)',
-                        }}>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:11,letterSpacing:1.5,color:T.textMuted}}>SELECT STATE</div>
-                        </div>
+                {/* Resend countdown */}
+                <div style={{ textAlign: 'center', fontSize: 12, color: T.textMuted }}>
+                  {resendIn > 0
+                    ? `Resend OTP in ${resendIn}s`
+                    : <span onClick={handleSendOtp} style={{ color: T.red, fontWeight: 700, cursor: 'pointer' }}>Resend OTP</span>}
+                </div>
 
-                        {/* Andhra Pradesh */}
-                        <div onClick={()=>{ setDropState('AP'); setDropStep('constituency'); }}
-                          style={{
-                            display:'flex', alignItems:'center', gap:12,
-                            padding:'16px 18px',cursor:'pointer',
-                            borderBottom:`1px solid ${T.border}`,
-                            transition:'background 0.15s',
-                            background: selectedChannel && selectedChannel.state==='AP'?`rgba(208,2,27,0.06)`:'transparent',
-                          }}>
-                          <div style={{width:8,height:8,borderRadius:'50%',flexShrink:0,
-                            background: selectedChannel && selectedChannel.state==='AP' ? T.red : T.border}}/>
-                          <div style={{flex:1}}>
-                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.text,letterSpacing:0.3}}>Andhra Pradesh</div>
-                            <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:12,lineHeight:1.65,color:T.textMuted,marginTop:1}}>
-                              ఆంధ్రప్రదేశ్ · {LIVE_CHANNELS.filter(c=>c.state==='AP').length} live channels
-                            </div>
-                          </div>
-                          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth={2.5} strokeLinecap="round">
-                            <polyline points="9 18 15 12 9 6"/>
-                          </svg>
-                        </div>
+                {otpMsg && (
+                  <div style={{ fontSize: 11, padding: '8px 12px', borderRadius: 8,
+                    color: otpMsgType === 'available' ? '#00C85A' : otpMsgType === 'checking' ? T.textMuted : '#D0021B',
+                    background: otpMsgType === 'available' ? 'rgba(0,200,90,0.1)' : otpMsgType === 'checking' ? 'rgba(150,150,150,0.08)' : 'rgba(208,2,27,0.1)',
+                    border: `1px solid ${otpMsgType === 'available' ? 'rgba(0,200,90,0.3)' : otpMsgType === 'checking' ? 'rgba(150,150,150,0.15)' : 'rgba(208,2,27,0.33)'}` }}>
+                    {otpMsg}
+                  </div>
+                )}
+              </>
+            )}
 
-                        {/* Telangana */}
-                        <div onClick={()=>{ setDropState('TG'); setDropStep('constituency'); }}
-                          style={{
-                            display:'flex', alignItems:'center', gap:12,
-                            padding:'16px 18px',cursor:'pointer',
-                            transition:'background 0.15s',
-                            background: selectedChannel && selectedChannel.state==='TG'?`rgba(208,2,27,0.06)`:'transparent',
-                          }}>
-                          <div style={{width:8,height:8,borderRadius:'50%',flexShrink:0,
-                            background: selectedChannel && selectedChannel.state==='TG' ? T.red : T.border}}/>
-                          <div style={{flex:1}}>
-                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.text,letterSpacing:0.3}}>Telangana</div>
-                            <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:12,lineHeight:1.65,color:T.textMuted,marginTop:1}}>
-                              తెలంగాణ · {LIVE_CHANNELS.filter(c=>c.state==='TG').length} live channels
-                            </div>
-                          </div>
-                          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth={2.5} strokeLinecap="round">
-                            <polyline points="9 18 15 12 9 6"/>
-                          </svg>
-                        </div>
-                        <div style={{height:4}}/>
-                      </>
+            {/* Aadhaar note */}
+            <div style={{ background: 'rgba(255,184,0,0.08)', borderRadius: 10, padding: '12px', border: `1px solid rgba(255,184,0,0.2)` }}>
+              <div style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginBottom: 4 }}>💡 Aadhaar Verification (Optional)</div>
+              <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.5 }}>
+                Verify with Aadhaar to get +20 trust score and Gold reporter badge. Available after OTP verification.
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* ════ STEP 2 — YOUR PROFILE ════ */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Full name */}
+            <div>
+              <div style={labelStyle}>Full Name *</div>
+              <input value={name} onChange={e => setName(e.target.value)}
+                placeholder="As per Aadhaar card"
+                style={{ width: '100%', background: T.bg3, borderRadius: 10, padding: '12px', fontSize: 14, color: T.text, border: `1px solid ${T.border}`, outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+
+            {/* Profile photo */}
+            <div>
+              <div style={labelStyle}>Profile Photo (Optional)</div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ width: 64, height: 64, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, background: T.bg3, border: `2px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {photoPreview
+                    ? <img src={photoPreview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : <span style={{ fontSize: 28, color: T.textMuted }}>👤</span>}
+                </div>
+                <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setShowCamera(true)}
+                    style={{ flex: 1, padding: '10px 8px', borderRadius: 10, cursor: 'pointer', border: 'none', background: 'linear-gradient(160deg,#E8001E 0%,#B0001A 100%)', boxShadow: '0 2px 10px rgba(208,2,27,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </svg>
+                    <span style={{ fontSize: 12, color: 'white', fontWeight: 800 }}>Photo</span>
+                  </button>
+                  <button type="button" onClick={() => document.getElementById('reg-photo-lib')?.click()}
+                    style={{ flex: 1, padding: '10px 8px', borderRadius: 10, cursor: 'pointer', border: `2px solid ${T.red}`, background: T.isDark ? T.bg3 : '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#2B7FFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    <span style={{ fontSize: 12, color: T.red, fontWeight: 800 }}>Library</span>
+                  </button>
+                </div>
+              </div>
+              <input id="reg-photo-camera" type="file" accept="image/*" capture="user" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (!f) return; setPhoto(f); setPhotoPreview(URL.createObjectURL(f)); }} />
+              <input id="reg-photo-lib" type="file" accept="image/*" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (!f) return; setPhoto(f); setPhotoPreview(URL.createObjectURL(f)); }} />
+            </div>
+
+            {/* State */}
+            <div>
+              <div style={labelStyle}>State *</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {['AP', 'TG'].map(s => (
+                  <button key={s} onClick={() => { setState(s); setConstituency(''); setSearch(''); }}
+                    style={{ flex: 1, background: state === s ? 'rgba(208,2,27,0.15)' : T.bg3, border: `1px solid ${state === s ? T.red : T.border}`, borderRadius: 10, padding: '12px', color: state === s ? T.red : T.text, fontWeight: 700, cursor: 'pointer' }}>
+                    {s === 'AP' ? 'Andhra Pradesh' : 'Telangana'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Constituency */}
+            <div>
+              <div style={labelStyle}>
+                Your Constituency * <span style={{ color: T.red, fontSize: 9, textTransform: 'none', letterSpacing: 0 }}>(You can only upload news to this constituency)</span>
+              </div>
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="🔍 Search (Telugu or English)…"
+                style={{ width: '100%', background: T.bg3, borderRadius: 10, padding: '10px 12px', fontSize: 13, color: T.text, border: `1px solid ${T.border}`, marginBottom: 6, outline: 'none', boxSizing: 'border-box' }} />
+
+              {constituency && (() => {
+                const sel = liveAll.find(c => c.en === constituency)
+                  || restAP.find(c => c.en === constituency)
+                  || restTG.find(c => c.en === constituency);
+                return (
+                  <div style={{ background: 'rgba(208,2,27,0.15)', borderRadius: 8, padding: '10px 12px', border: `1px solid ${T.red}44`, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: T.red, fontSize: 14 }}>✓</span>
+                    <div style={{ flex: 1 }}>
+                      {sel && <div style={{ fontFamily: "'Noto Sans Telugu',sans-serif", fontSize: 15, color: T.red, fontWeight: 700, lineHeight: 1.6 }}>{sel.te}</div>}
+                      <div style={{ fontSize: 11, color: T.red, opacity: 0.85 }}>{constituency}</div>
+                    </div>
+                    {sel && sel.live && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(0,200,90,0.15)', borderRadius: 5, padding: '2px 6px' }}>
+                        <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#00C85A', animation: 'blink 1s infinite' }} />
+                        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 9, color: '#00C85A', letterSpacing: 0.5 }}>LIVE</span>
+                      </div>
                     )}
+                  </div>
+                );
+              })()}
 
-                    {/* ── STEP 2: Select Constituency ── */}
-                    {dropStep === 'constituency' && (
-                      <>
-                        <div style={{
-                          display:'flex', alignItems:'center', gap:10,
-                          padding:'10px 14px',
-                          borderBottom:`1px solid ${T.border}`,
-                          background: T.isDark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.02)',
-                        }}>
-                          <button onClick={()=>setDropStep('state')}
-                            style={{
-                              width:30,height:30,borderRadius:8,border:`1px solid ${T.border}`,
-                              background:T.bg3,color:T.text,cursor:'pointer',
-                              display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
-                            }}>
-                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth={2.5} strokeLinecap="round">
-                              <polyline points="15 18 9 12 15 6"/>
-                            </svg>
-                          </button>
-                          <div style={{flex:1}}>
-                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:11,letterSpacing:1.5,color:T.textMuted}}>
-                              {dropState==='AP'?'ANDHRA PRADESH':'TELANGANA'} · SELECT CHANNEL
-                            </div>
-                          </div>
-                        </div>
-
-                        {LIVE_CHANNELS.filter(c=>c.state===dropState).map((c,i)=>(
-                          <div key={c.id}
-                            onClick={()=>{
-                              setState(c.state);
-                              setConstituency(c.nameEn);
-                              setShowChannelDropdown(false);
-                              setDropStep('state');
-                              setDropState(null);
-                            }}
-                            style={{
-                              display:'flex',alignItems:'center',gap:12,
-                              padding:'13px 16px',cursor:'pointer',
-                              background: constituency===c.nameEn?`rgba(208,2,27,0.1)`:'transparent',
-                              borderLeft: constituency===c.nameEn?`3px solid ${T.red}`:'3px solid transparent',
-                              borderBottom: i < LIVE_CHANNELS.filter(x=>x.state===dropState).length-1
-                                ? `1px solid ${T.border}` : 'none',
-                              transition:'all 0.15s',
-                            }}>
-                            <div style={{flexShrink:0}}>
-                              <LocationPin size={22}/>
-                            </div>
-                            <div style={{flex:1}}>
-                              <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontWeight:700,fontSize:17,color:T.text,lineHeight:1.3}}>{c.name}</div>
-                              <div style={{display:'flex',alignItems:'center',gap:5,marginTop:2}}>
-                                <div style={{width:5,height:5,borderRadius:'50%',background:'#00C85A',animation:'blink 1s infinite'}}/>
-                                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,color:'#00C85A',fontWeight:700,letterSpacing:0.5}}>
-                                  LIVE · {c.viewers.toLocaleString()} watching
-                                </span>
-                              </div>
-                            </div>
-                            {constituency===c.nameEn && (
-                              <div style={{
-                                width:22,height:22,borderRadius:'50%',background:T.red,
-                                display:'flex',alignItems:'center',justifyContent:'center',
-                                fontSize:12,color:'white',fontWeight:700,flexShrink:0,
-                              }}>✓</div>
-                            )}
-                          </div>
-                        ))}
-                        <div style={{height:6}}/>
-                      </>
-                    )}
+              <div style={{ maxHeight: 220, overflowY: 'auto', background: T.bg3, borderRadius: 10, border: `1px solid ${T.border}` }}>
+                {liveItems.length > 0 && (
+                  <>
+                    <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,200,90,0.08)', borderBottom: `1px solid rgba(0,200,90,0.15)`, position: 'sticky', top: 0, zIndex: 1 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00C85A', animation: 'blink 1s infinite' }} />
+                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 10, color: '#00C85A', letterSpacing: 1.2 }}>LIVE CHANNELS · {liveItems.length}</span>
+                    </div>
+                    {liveItems.map(c => (
+                      <RegRow key={'live-' + c.en} c={c} constituency={constituency} setConst={setConstituency} setSearch={setSearch} isLive={true} onSelect={selectLocation} />
+                    ))}
+                  </>
+                )}
+                {otherItems.length > 0 && (
+                  <>
+                    <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6, background: T.bg3, borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, position: 'sticky', top: 0, zIndex: 1 }}>
+                      <span style={{ fontSize: 10 }}>🚀</span>
+                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 10, color: T.textMuted, letterSpacing: 1.2 }}>LAUNCHING SOON · {otherItems.length}</span>
+                    </div>
+                    {otherItems.map(c => (
+                      <RegRow key={c.state + '-' + c.en} c={c} constituency={constituency} setConst={setConstituency} setSearch={setSearch} isLive={false} onSelect={selectLocation} />
+                    ))}
+                  </>
+                )}
+                {noMatches && (
+                  <div style={{ padding: '20px 12px', textAlign: 'center', fontSize: 12, color: T.textMuted }}>
+                    No matches for "{search}"
                   </div>
                 )}
               </div>
             </div>
-            {/* Backdrop to close dropdown on outside click */}
-            {showChannelDropdown && (
-              <div style={{position:'fixed',inset:0,zIndex:100}}
-                onClick={()=>{setShowChannelDropdown(false); setDropStep('state'); setDropState(null);}}/>
-            )}
-          </div>
 
-          {/* Name */}
-          <div style={{marginBottom:14}}>
-            <div style={{marginBottom:4}}>
-              <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:13,color:T.text}}>పేరు</div>
-              <div style={{fontSize:11,color:T.textMuted}}>Name</div>
-            </div>
-            <input value={name} onChange={e=>setName(e.target.value)}
-              placeholder="e.g. Ravi Kumar"
-              style={{width:'100%',border:`1.5px solid ${T.inputBorder}`,borderRadius:10,
-                padding:'12px 14px',fontSize:14,color:T.text,background:T.inputBg,
-                outline:'none',boxSizing:'border-box'}}/>
-          </div>
-
-          {/* Mobile */}
-          <div style={{marginBottom:14}}>
-            <div style={{marginBottom:4}}>
-              <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:13,color:T.text}}>మొబైల్ నంబర్</div>
-              <div style={{fontSize:11,color:T.textMuted}}>Mobile Number</div>
-            </div>
-            <input value={mobile} onChange={e=>setMobile(e.target.value.replace(/[^\d]/g,'').slice(0,10))}
-              placeholder="98765 43210" type="tel" maxLength={10}
-              style={{width:'100%',border:`1.5px solid ${T.inputBorder}`,borderRadius:10,
-                padding:'12px 14px',fontSize:14,color:T.text,background:T.inputBg,
-                outline:'none',boxSizing:'border-box',letterSpacing:0.5}}/>
-            {phoneMsg && (
-              <div style={{fontSize:11,color:phoneMsgType==='available'?'#00C85A':phoneMsgType==='checking'?T.textMuted:'#D0021B',background:phoneMsgType==='available'?'rgba(0,200,90,0.1)':phoneMsgType==='checking'?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:8,padding:'8px 12px',border:`1px solid ${phoneMsgType==='available'?'rgba(0,200,90,0.3)':phoneMsgType==='checking'?'rgba(255,255,255,0.1)':'rgba(208,2,27,0.33)'}`,marginTop:6}}>{phoneMsg}</div>
-            )}
-          </div>
-
-          {/* Profile Photo — Photo + Library buttons */}
-          <div style={{marginBottom:14}}>
-            <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:8}}>
-              <div>
-                <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:13,color:T.text}}>ప్రొఫైల్ ఫోటో</div>
-                <div style={{fontSize:11,color:T.textMuted}}>Profile Photo</div>
+            {submitMsg && (
+              <div style={{ fontSize: 12, color: submitting ? T.textMuted : '#D0021B', background: submitting ? 'rgba(150,150,150,0.08)' : 'rgba(208,2,27,0.1)', borderRadius: 10, padding: '10px 14px', border: `1px solid ${submitting ? 'rgba(150,150,150,0.15)' : 'rgba(208,2,27,0.33)'}` }}>
+                {submitMsg}
               </div>
-              <span style={{fontSize:10,fontWeight:600,color:T.textMuted,background:T.bg3,
-                padding:'2px 7px',borderRadius:6,letterSpacing:0.3}}>OPTIONAL</span>
-            </div>
-            <div style={{display:'flex',gap:10,alignItems:'center'}}>
-              {/* Preview avatar */}
-              <div style={{
-                width:64,height:64,borderRadius:'50%',overflow:'hidden',flexShrink:0,
-                background:T.bg3,border:`2px solid ${T.border}`,
-                display:'flex',alignItems:'center',justifyContent:'center',
+            )}
+
+            <button onClick={handleSubmitProfile} disabled={submitting}
+              style={{
+                background: submitting ? T.gray3 : `linear-gradient(135deg,${T.red},#9A0015)`,
+                color: 'white', border: 'none', borderRadius: 12, padding: '15px',
+                fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 17, letterSpacing: 2,
+                cursor: submitting ? 'not-allowed' : 'pointer',
+                boxShadow: submitting ? 'none' : `0 8px 24px ${T.red}44`,
+                opacity: submitting ? 0.7 : 1, marginTop: 4,
               }}>
-                {photoPreview
-                  ? <img src={photoPreview} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                  : <span style={{fontSize:28,color:T.textMuted}}>👤</span>
-                }
-              </div>
-              <div style={{flex:1,display:'flex',gap:8}}>
-                <button type="button" onClick={()=>setShowCamera(true)}
-                  onMouseEnter={e=>{
-                    e.currentTarget.style.transform='translateY(-2px)';
-                    e.currentTarget.style.boxShadow='0 6px 18px rgba(208,2,27,0.5)';
-                    e.currentTarget.style.background='linear-gradient(160deg,#FF1A35 0%,#C8001F 100%)';
-                  }}
-                  onMouseLeave={e=>{
-                    e.currentTarget.style.transform='translateY(0)';
-                    e.currentTarget.style.boxShadow='0 2px 10px rgba(208,2,27,0.3)';
-                    e.currentTarget.style.background='linear-gradient(160deg,#E8001E 0%,#B0001A 100%)';
-                  }}
-                  style={{
-                    flex:1,padding:'10px 8px',borderRadius:10,cursor:'pointer',border:'none',
-                    background:'linear-gradient(160deg,#E8001E 0%,#B0001A 100%)',
-                    boxShadow:'0 2px 10px rgba(208,2,27,0.3)',
-                    display:'flex',alignItems:'center',justifyContent:'center',gap:6,
-                    transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-                  }}>
-                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
-                    <circle cx="12" cy="13" r="4"/>
-                  </svg>
-                  <span style={{fontSize:12,color:'white',fontWeight:800}}>Photo</span>
-                </button>
-                <button type="button" onClick={()=>document.getElementById('reg-photo-lib')?.click()}
-                  onMouseEnter={e=>{
-                    e.currentTarget.style.transform='translateY(-2px)';
-                    e.currentTarget.style.boxShadow='0 6px 18px rgba(208,2,27,0.3)';
-                    e.currentTarget.style.background='rgba(208,2,27,0.05)';
-                  }}
-                  onMouseLeave={e=>{
-                    e.currentTarget.style.transform='translateY(0)';
-                    e.currentTarget.style.boxShadow='none';
-                    e.currentTarget.style.background=T.isDark?T.bg3:'#FFFFFF';
-                  }}
-                  style={{
-                    flex:1,padding:'10px 8px',borderRadius:10,cursor:'pointer',
-                    border:`2px solid ${T.red}`,
-                    background:T.isDark?T.bg3:'#FFFFFF',
-                    display:'flex',alignItems:'center',justifyContent:'center',gap:6,
-                    transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-                  }}>
-                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#2B7FFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  <span style={{fontSize:12,color:T.red,fontWeight:800}}>Library</span>
-                </button>
-              </div>
-            </div>
-            <input id="reg-photo-camera" type="file" accept="image/*" capture="user" style={{display:'none'}}
-              onChange={e=>{
-                const f = e.target.files?.[0]; if(!f) return;
-                setPhoto(f); setPhotoPreview(URL.createObjectURL(f));
-              }}/>
-            <input id="reg-photo-lib" type="file" accept="image/*" style={{display:'none'}}
-              onChange={e=>{
-                const f = e.target.files?.[0]; if(!f) return;
-                setPhoto(f); setPhotoPreview(URL.createObjectURL(f));
-              }}/>
+              {submitting ? 'SUBMITTING…' : '🚀 START REPORTING'}
+            </button>
           </div>
-
-          {/* OTP — optional */}
-          <div>
-            <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:6}}>
-              <div>
-                <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:13,color:T.text}}>OTP ధృవీకరణ</div>
-                <div style={{fontSize:11,color:T.textMuted}}>OTP Verification</div>
-              </div>
-              <span style={{fontSize:10,fontWeight:600,color:T.textMuted,background:T.bg3,
-                padding:'2px 7px',borderRadius:6,letterSpacing:0.3}}>OPTIONAL</span>
-            </div>
-            <div style={{display:'flex',gap:8}}>
-              <input value={otp} onChange={e=>setOtp(e.target.value.replace(/[^\d]/g,''))}
-                placeholder={otpRequested?"Enter OTP":"Tap → Request OTP"}
-                disabled={!otpRequested} maxLength={6} type="tel"
-                style={{flex:1,border:`1.5px solid ${T.inputBorder}`,borderRadius:10,
-                  padding:'12px 14px',fontSize:14,color:T.text,
-                  background:otpRequested?T.inputBg:T.bg3,
-                  outline:'none',boxSizing:'border-box',letterSpacing:1,
-                  opacity:otpRequested?1:0.6}}/>
-              <button type="button" onClick={handleRequestOTP}
-                disabled={otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken'}
-                style={{
-                  background:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?'#888':'linear-gradient(135deg,#E8001E,#B0001A)',
-                  border:'none',borderRadius:10,padding:'10px 14px',
-                  color:'white',fontSize:12,fontWeight:800,letterSpacing:0.5,
-                  cursor:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?'not-allowed':'pointer',whiteSpace:'nowrap',
-                  opacity:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?0.6:1,
-                  boxShadow:(otpSending || !mobile || mobile.length !== 10 || phoneMsgType === 'taken')?'none':'0 2px 8px rgba(208,2,27,0.3)',
-                }}>
-                {otpSending?'Sending…':otpRequested?'Resend':'Request OTP'}
-              </button>
-            </div>
-            {otpMsg && (
-              <div style={{fontSize:11,color:otpMsgType==='available'?'#00C85A':otpMsgType==='checking'?T.textMuted:'#D0021B',background:otpMsgType==='available'?'rgba(0,200,90,0.1)':otpMsgType==='checking'?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:8,padding:'8px 12px',border:`1px solid ${otpMsgType==='available'?'rgba(0,200,90,0.3)':otpMsgType==='checking'?'rgba(255,255,255,0.1)':'rgba(208,2,27,0.33)'}`,marginTop:6}}>{otpMsg}</div>
-            )}
-          </div>
-        </div>
-
-        {/* Info note */}
-        <div style={{
-          background:'rgba(43,127,255,0.07)',border:'1px solid rgba(43,127,255,0.2)',
-          borderRadius:10,padding:'10px 14px',marginBottom:12,
-          fontSize:11,color:T.textMuted,lineHeight:1.5,
-        }}>
-          ℹ️ All fields are optional for testing. Tap <b>Submit</b> below to continue to the upload page.
-        </div>
-
-        {/* Submit status / error */}
-        {submitMsg && (
-          <div style={{fontSize:12,color:submitting?T.textMuted:'#D0021B',background:submitting?'rgba(255,255,255,0.05)':'rgba(208,2,27,0.1)',borderRadius:10,padding:'10px 14px',border:`1px solid ${submitting?'rgba(255,255,255,0.1)':'rgba(208,2,27,0.33)'}`,marginBottom:10}}>{submitMsg}</div>
         )}
-
-        {/* Submit */}
-        <button onClick={handleSubmit} disabled={!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting}
-          onMouseEnter={e=>{
-            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)) {
-              e.currentTarget.style.transform='translateY(-2px)';
-              e.currentTarget.style.boxShadow='0 8px 22px rgba(208,2,27,0.55)';
-              e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
-            }
-          }}
-          onMouseLeave={e=>{
-            if(!(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)) {
-              e.currentTarget.style.transform='translateY(0)';
-              e.currentTarget.style.boxShadow='0 4px 14px rgba(208,2,27,0.35)';
-              e.currentTarget.style.background='linear-gradient(135deg,#E8001E,#B0001A)';
-            }
-          }}
-          style={{
-            width:'100%',
-            background:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?'#888':'linear-gradient(135deg,#E8001E,#B0001A)',
-            color:'white',border:'none',borderRadius:12,padding:'14px',
-            cursor:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?'not-allowed':'pointer',
-            display:'flex',flexDirection:'column',alignItems:'center',gap:2,
-            opacity:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?0.6:1,
-            boxShadow:(!mobile || mobile.length !== 10 || phoneMsgType === 'taken' || phoneChecking || submitting)?'none':'0 4px 14px rgba(208,2,27,0.35)',
-            transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-          }}>
-          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:16,letterSpacing:0.5,lineHeight:1.2}}>
-            {submitting ? 'Submitting…' : '🚀 Submit and Go To Upload'}
-          </span>
-          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:0.8,opacity:0.95,lineHeight:1.2,marginTop:2}}>
-            News / Information
-          </span>
-        </button>
       </div>
 
       {showCamera && (
         <CameraCaptureModal
-          onClose={()=>setShowCamera(false)}
-          onCapture={(file)=>{ setPhoto(file); setPhotoPreview(URL.createObjectURL(file)); setShowCamera(false); }}
-          onFallback={()=>{ setShowCamera(false); document.getElementById('reg-photo-camera')?.click(); }}
+          onClose={() => setShowCamera(false)}
+          onCapture={(file) => { setPhoto(file); setPhotoPreview(URL.createObjectURL(file)); setShowCamera(false); }}
+          onFallback={() => { setShowCamera(false); document.getElementById('reg-photo-camera')?.click(); }}
         />
       )}
 
@@ -822,14 +729,6 @@ function CameraCaptureModal({ onClose, onCapture, onFallback }) {
     </div>
   );
 }
-
-
-// ── My Profile — minimal view: name, constituency, role, mobile, photo only ──
-// ════════════════════════════════════════════════════════════════════
-// ── ADMIN DASHBOARD (DEMO) — mirrors Plan v1.3 (3-tier system) ──────
-//    Visual mockup only. Sample data, no backend wiring. Entry point:
-//    Profile → "Admin Dashboard". Founder reviews here & gives changes.
-//    Switch role (Super / Master / Admin) to see tier differences.
 
 export { UploadRegistrationScreen };
 export default UploadRegistrationScreen;

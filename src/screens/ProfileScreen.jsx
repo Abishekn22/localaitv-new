@@ -64,15 +64,29 @@ function ProfileScreen({ onNavigate }) {
     };
   }, [deleteStep]);
 
-  const profilePhotoUrl = useMemo(() => resolveProfilePictureUrl(user?.profile_picture), [user?.profile_picture]);
+  const profilePhotoUrl = useMemo(
+    () => resolveProfilePictureUrl(
+      user?.profile_picture || user?.profile_photo || user?.profilePhoto || user?.photo || user?.avatar || ''
+    ),
+    [user]
+  );
   const locationLabel = useMemo(() => {
     if (!user) return '';
+    // Resolve a numeric id (from location_id, or a numeric `location`) to its
+    // human name via the global mapping — never display the raw id.
+    const numericId =
+      user.location_id != null ? Number(user.location_id)
+      : typeof user.location === 'number' ? user.location
+      : (typeof user.location === 'string' && /^\d+$/.test(user.location.trim())) ? Number(user.location.trim())
+      : null;
+    if (numericId != null) {
+      const name = getLocationNameFromId(numericId);
+      if (name) return name;
+    }
     if (user.location) {
-      // If the backend already returned a string label, use it directly.
       if (typeof user.location === 'string') return user.location;
       if (typeof user.location === 'object' && user.location.name) return user.location.name;
     }
-    if (user.location_id != null) return getLocationNameFromId(user.location_id);
     return '';
   }, [user]);
 
@@ -166,7 +180,6 @@ function ProfileScreen({ onNavigate }) {
     { icon:'✉️', label:'Email',             val: user.email || '—' },
     { icon:'📞', label:'Mobile / మొబైల్',   val: user.phone || '—' },
     { icon:'📍', label:'Location',          val: locationLabel || '—' },
-    { icon:'🎭', label:'Role',              val: user.role || '—' },
     ...(memberSince ? [{ icon:'📅', label:'Member since', val: memberSince }] : []),
   ];
 
@@ -260,16 +273,6 @@ function ProfileScreen({ onNavigate }) {
           </button>
         )}
 
-        {/* Edit Profile */}
-        <button onClick={()=>onNavigate('uploadregister')} style={{
-          width:'100%', marginTop:8,
-          background:'linear-gradient(135deg,#E8001E,#D0021B)',
-          color:'#FFFFFF', border:'none', borderRadius:12, padding:'14px',
-          fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:15,
-          cursor:'pointer', boxShadow:'0 4px 14px rgba(208,2,27,0.35)',
-        }}>
-          ✏️ Edit Profile
-        </button>
 
         {/* Sign out */}
         <button onClick={()=>{ logout(); onNavigate('home'); }} style={{
