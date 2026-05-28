@@ -140,7 +140,7 @@ function ProfileScreen({ onNavigate }) {
           {bootstrapping ? 'Loading profile…' : 'You are not signed in'}
         </div>
         {!bootstrapping && (
-          <button onClick={()=>onNavigate('uploadregistration')} style={{
+          <button onClick={()=>onNavigate('uploadregister')} style={{
             background:'linear-gradient(135deg,#E8001E,#B0001A)',color:'white',border:'none',
             borderRadius:12,padding:'14px 24px',fontWeight:800,fontSize:14,cursor:'pointer',
           }}>
@@ -241,7 +241,7 @@ function ProfileScreen({ onNavigate }) {
         ))}
 
         {/* Edit Profile */}
-        <button onClick={()=>onNavigate('uploadregistration')} style={{
+        <button onClick={()=>onNavigate('uploadregister')} style={{
           width:'100%', marginTop:8,
           background:'linear-gradient(135deg,#E8001E,#D0021B)',
           color:'#FFFFFF', border:'none', borderRadius:12, padding:'14px',
