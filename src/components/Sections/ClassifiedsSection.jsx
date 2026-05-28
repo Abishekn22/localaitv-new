@@ -15,9 +15,15 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
 
   const { data: liveClassifieds } = useAPI(
     () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=30`).then(d => d.items || d),
-    CLASSIFIEDS, [constituency]
+    [], [constituency]
   );
-  const all = (Array.isArray(liveClassifieds) && liveClassifieds.length > 0) ? liveClassifieds : CLASSIFIEDS;
+  // For every category the API returns live data for, use ONLY the live rows;
+  // keep the static mock for categories that have no live data yet.
+  const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
+  const liveCats  = new Set(liveItems.map(c => c.cat));
+  const all = liveItems.length > 0
+    ? [...liveItems, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
+    : CLASSIFIEDS;
 
   // Randomly shuffle for display on home page — memoised so it doesn't re-shuffle on every re-render
   const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);
@@ -129,7 +135,10 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
           onTouchStart={() => setPaused(true)}
           onTouchEnd={() => setTimeout(() => setPaused(false), 3000)}
           style={{display:'flex',gap:10,padding:'0 16px 14px',overflowX:'auto',scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
-          {[...filtered, ...filtered].map((cl,i)=>(
+          {/* Duplicate the list only when there are enough cards to actually
+              scroll — keeps the seamless auto-scroll loop for long lists while
+              avoiding a visible repeat for short ones. */}
+          {(filtered.length > 7 ? [...filtered, ...filtered] : filtered).map((cl,i)=>(
             <div key={cl.id+'-'+i} onClick={()=>openItem(cl)}
               style={{flexShrink:0,width:155,borderRadius:14,overflow:'hidden',
                 border:`1px solid ${T.border}`,cursor:'pointer',
@@ -144,10 +153,10 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
               <div style={{width:'100%',height:100,position:'relative',overflow:'hidden',
                 background:T.bg3}}>
                 <img
-                  src={CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']}
+                  src={(Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']}
                   alt={cl.cat}
                   style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}
-                  onError={e=>{e.target.style.display='none';}}
+                  onError={e=>{ e.target.src = CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']; }}
                 />
                 {/* Light gradient at bottom for text */}
                 <div style={{position:'absolute',bottom:0,left:0,right:0,height:40,

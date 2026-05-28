@@ -3,8 +3,37 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import BottomNav from './../components/BottomNav.jsx';
 
+// Classify a submitted profile into a tab bucket from its designation/role
+// text (works for English + Telugu). Falls back to 'other' (shown only in
+// the Prominent tab).
+function classifyPerson(role) {
+  const r = (role || '').toString();
+  const has = (re) => re.test(r);
+  // Political leaders / elected representatives
+  if (has(/\b(MLA|MP|MLC|minister|corporator|councillor|sarpanch|chairman|mayor|ZP|zilla\s*parishad|mandal\s*president|party)\b/i)
+      || /నాయక|శాసనసభ|పార్లమెంట్|మంత్రి|ఛైర్మన్|చైర్మన్|సర్పంచ్|కార్పొరేటర్|మేయర్|పార్టీ|అధ్యక్ష|ఎమ్మెల్యే|ఎంపీ/.test(r))
+    return 'political';
+  // Agriculture / horticulture
+  if (has(/\b(agricultur|horticultur|farmer|agri|krishi|rythu)\b/i)
+      || /వ్యవసాయ|ఉద్యాన|రైతు|హార్టికల్చర్|కృషి/.test(r))
+    return 'agri';
+  // Government officials / bureaucracy
+  if (has(/\b(IAS|IPS|IFS|collector|officer|commissioner|director|tahsildar|RDO|MRO|secretary|superintendent|govt|government|VAO|DEO|DMHO)\b/i)
+      || /అధికారి|కలెక్టర్|కమిషనర్|డైరెక్టర్|కార్యదర్శి|తహసీల్దార్|ప్రభుత్వ|సూపరింటెండెంట్/.test(r))
+    return 'govt';
+  return 'other';
+}
+
 function WhosWhoScreen({ onBack, onNavigate, constituency }) {
-  const [tab, setTab] = useState('govt');
+  const [tab, setTab] = useState('people');
+
+  // ── Live submitted "prominent people" profiles (from the Who-is-Who form) ──
+  const { data: liveProfiles } = useAPI(
+    () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency || 'Kurnool')}&limit=50`)
+            .then(d => (d.items || d).filter(c => c.cat === 'Who is Who')),
+    [], [constituency]
+  );
+  const people = Array.isArray(liveProfiles) ? liveProfiles : [];
 
   // ── Constituency-keyed Who's Who data (researched May 2026) ──
   // Sources: official district .ap.gov.in / .telangana.gov.in portals,
@@ -116,7 +145,7 @@ function WhosWhoScreen({ onBack, onNavigate, constituency }) {
       { name:'Disaster Mgmt',  role:'NDRF Helpline',        phone:'1078', office:'All India',                   emoji:'⚠️' },
     ],
   };
-  const tabs = [{id:'govt',label:'Govt'},{id:'political',label:'Political'},{id:'agri',label:'Agri'},{id:'police',label:'Helplines'}];
+  const tabs = [{id:'people',label:'Prominent'},{id:'govt',label:'Govt'},{id:'political',label:'Political'},{id:'agri',label:'Agri'},{id:'police',label:'Helplines'}];
   return (
     <div style={{width:'100%',height:'100%',background:T.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style={{background:T.bg2,padding:'50px 18px 0',flexShrink:0}}>
@@ -151,25 +180,77 @@ function WhosWhoScreen({ onBack, onNavigate, constituency }) {
           </span>
         </div>
 
-        {(sections[tab]||[]).map((p,i)=>(
-          <div key={i} style={{background:T.bg2,borderRadius:12,padding:'14px',marginBottom:10,border:`1px solid ${T.border}`}}>
-            <div style={{display:'flex',alignItems:'center',gap:12}}>
-              <div style={{width:44,height:44,borderRadius:12,background:`rgba(208,2,27,0.15)`,border:`1px solid rgba(208,2,27,0.2)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,flexShrink:0}}>{p.emoji}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:700,color:T.text}}>{p.name}</div>
-                <div style={{fontSize:11,color:T.gold,marginTop:1}}>{p.role}</div>
-                {p.office&&<div style={{fontSize:10,color:T.textMuted,marginTop:1}}>{p.office}</div>}
+        {(() => {
+          // Live submitted profiles to show on this tab:
+          //   • Prominent  → ALL submitted people
+          //   • Govt/Political/Agri → only those whose designation matches
+          //   • Helplines  → none (static only)
+          const livePeople = tab === 'people'
+            ? people
+            : people.filter(p => classifyPerson(p.role) === tab);
+          const statics = tab === 'people' ? [] : (sections[tab] || []);
+
+          if (livePeople.length === 0 && statics.length === 0) {
+            return (
+              <div style={{textAlign:'center',color:T.textMuted,fontSize:13,padding:'40px 16px'}}>
+                {tab === 'people'
+                  ? `No prominent-people profiles submitted yet for ${constituency || 'Kurnool'}.`
+                  : 'Nothing here yet.'}
               </div>
-            </div>
-            {p.phone&&(
-              <a href={`tel:${p.phone}`} style={{display:'flex',alignItems:'center',gap:8,marginTop:10,background:`rgba(0,198,184,0.08)`,borderRadius:8,padding:'8px 12px',textDecoration:'none'}}>
-                <span style={{fontSize:14}}>📞</span>
-                <span style={{fontSize:13,color:T.teal,fontWeight:600}}>{p.phone}</span>
-                <span style={{fontSize:10,color:T.textMuted,marginLeft:'auto'}}>Tap to call</span>
-              </a>
-            )}
-          </div>
-        ))}
+            );
+          }
+
+          return (
+            <>
+              {/* Submitted profiles (with photo) */}
+              {livePeople.map((p,i)=>(
+                <div key={p.id||`live${i}`} style={{background:T.bg2,borderRadius:12,padding:'14px',marginBottom:10,border:`1px solid ${T.border}`}}>
+                  <div style={{display:'flex',alignItems:'center',gap:12}}>
+                    <img
+                      src={(Array.isArray(p.images) && p.images[0]) || ''}
+                      alt={p.name||''}
+                      style={{width:52,height:52,borderRadius:12,objectFit:'cover',flexShrink:0,background:T.bg3}}
+                      onError={e=>{ e.target.style.visibility='hidden'; }}
+                    />
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:T.text}}>{p.name || p.title}</div>
+                      {p.role&&<div style={{fontSize:11,color:T.gold,marginTop:1}}>{p.role}</div>}
+                      {p.location&&<div style={{fontSize:10,color:T.textMuted,marginTop:1}}>📍 {p.location}</div>}
+                    </div>
+                  </div>
+                  {p.phone&&(
+                    <a href={`tel:${p.phone}`} style={{display:'flex',alignItems:'center',gap:8,marginTop:10,background:`rgba(0,198,184,0.08)`,borderRadius:8,padding:'8px 12px',textDecoration:'none'}}>
+                      <span style={{fontSize:14}}>📞</span>
+                      <span style={{fontSize:13,color:T.teal,fontWeight:600}}>{p.phone}</span>
+                      <span style={{fontSize:10,color:T.textMuted,marginLeft:'auto'}}>Tap to call</span>
+                    </a>
+                  )}
+                </div>
+              ))}
+
+              {/* Static district directory (emoji) */}
+              {statics.map((p,i)=>(
+                <div key={`static${i}`} style={{background:T.bg2,borderRadius:12,padding:'14px',marginBottom:10,border:`1px solid ${T.border}`}}>
+                  <div style={{display:'flex',alignItems:'center',gap:12}}>
+                    <div style={{width:44,height:44,borderRadius:12,background:`rgba(208,2,27,0.15)`,border:`1px solid rgba(208,2,27,0.2)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,flexShrink:0}}>{p.emoji}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:T.text}}>{p.name}</div>
+                      <div style={{fontSize:11,color:T.gold,marginTop:1}}>{p.role}</div>
+                      {p.office&&<div style={{fontSize:10,color:T.textMuted,marginTop:1}}>{p.office}</div>}
+                    </div>
+                  </div>
+                  {p.phone&&(
+                    <a href={`tel:${p.phone}`} style={{display:'flex',alignItems:'center',gap:8,marginTop:10,background:`rgba(0,198,184,0.08)`,borderRadius:8,padding:'8px 12px',textDecoration:'none'}}>
+                      <span style={{fontSize:14}}>📞</span>
+                      <span style={{fontSize:13,color:T.teal,fontWeight:600}}>{p.phone}</span>
+                      <span style={{fontSize:10,color:T.textMuted,marginLeft:'auto'}}>Tap to call</span>
+                    </a>
+                  )}
+                </div>
+              ))}
+            </>
+          );
+        })()}
       </div>
       <BottomNav active="local" onChange={onNavigate} />
     </div>

@@ -5,7 +5,7 @@ import ClassifiedFeedItem from './../components/Feed/ClassifiedFeedItem.jsx';
 import ClassifiedShareSheet from './../components/Feed/ClassifiedShareSheet.jsx';
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 
-function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All' }) {
+function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', constituency = 'Kurnool' }) {
   const { T }    = useAppTheme();
   const [activeCat,   setActiveCat]   = useState(startCat);
   const [idx,         setIdx]         = useState(startIdx);
@@ -21,10 +21,22 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All' }) {
 
   useEffect(() => { document.body.style.overflow='hidden'; return()=>{ document.body.style.overflow=''; }; }, []);
 
+  // Live data from the backend (Who-is-Who today; more categories later).
+  const { data: liveClassifieds } = useAPI(
+    () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=50`).then(d => d.items || d),
+    [], [constituency]
+  );
+
   const filtered = useMemo(() => {
-    const items = activeCat === 'All' ? CLASSIFIEDS : CLASSIFIEDS.filter(c => c.cat === activeCat);
+    // For categories with live rows, use ONLY live; keep mock for the rest.
+    const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
+    const liveCats  = new Set(liveItems.map(c => c.cat));
+    const source = liveItems.length > 0
+      ? [...liveItems, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
+      : CLASSIFIEDS;
+    const items = activeCat === 'All' ? source : source.filter(c => c.cat === activeCat);
     return [...items].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
-  }, [activeCat]);
+  }, [activeCat, liveClassifieds]);
 
   const total   = filtered.length;
   // 360° infinite wrap — getLoopIdx handles negative indices, so goPrev can decrement freely.

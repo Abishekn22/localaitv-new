@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
 
-function ImageSlideshowPlayer({ images, ytId, isActive, cat }) {
+function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
   const { T } = useAppTheme();
   const [slide, setSlide]   = useState(0);
   const [fading, setFading]  = useState(false);
@@ -37,6 +37,24 @@ function ImageSlideshowPlayer({ images, ytId, isActive, cat }) {
     'Events':       'linear-gradient(135deg,#E65100,#FF9800)',
     'Shopping':     'linear-gradient(135deg,#F57F17,#FFB300)',
   };
+
+  // If an uploaded video is present, play it (autoplay, looped, with controls).
+  if (Array.isArray(videos) && videos.length > 0) {
+    return (
+      <div style={{ width:'100%', height:'100%', position:'relative', background:'#000' }}>
+        <video
+          src={videos[0]}
+          autoPlay={isActive}
+          muted
+          loop
+          playsInline
+          controls
+          style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', background:'#000' }}
+          onError={e => { e.target.style.display='none'; }}
+        />
+      </div>
+    );
+  }
 
   // If YouTube video available, embed it
   if (ytId && isActive) {

@@ -50,6 +50,7 @@ function ClassifiedFeedItem({ item, isActive, onShare, onComment }) {
       }}>
         <ImageSlideshowPlayer
           images={item.images}
+          videos={item.videos}
           ytId={item.ytId}
           isActive={isActive}
           cat={item.cat}
