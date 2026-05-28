@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 function ChannelPartnerScreen({ onBack }) {
   const { T } = useAppTheme();
+  const { token } = useAuth();
   const [name,         setName]         = useState('');
   const [phone,        setPhone]        = useState('');
   const [email,        setEmail]        = useState('');
@@ -31,8 +33,36 @@ function ChannelPartnerScreen({ onBack }) {
 
   function handleSubmit() {
     if (!validate()) return;
-    // Build email body
-    const body = encodeURIComponent(
+
+    // ── Contact Us API submission (POST /contacts) ──
+    // Field mapping: name→name, email→email, occupation→subject; mobile,
+    // channel location (state + constituency) and background (experience +
+    // why-partner) are combined into a clean labelled `message`.
+    const message =
+`Channel Partner Application
+
+Mobile: +91 ${phone}
+State: ${state}
+Constituency / Town: ${constituency}
+
+Media / Business Experience:
+${experience || 'Not mentioned'}
+
+Why Channel Partner:
+${whyPartner || 'Not mentioned'}`;
+
+    // API_BASE already ends in /api → path is '/contacts'. Bearer token is
+    // attached only when the user is signed in (form is open to anon users).
+    try {
+      apiCall('/contacts', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: JSON.stringify({ name, email, subject: occupation, message }),
+      }).catch(()=>{});
+    } catch (e) { /* ignore */ }
+
+    // Keep the email draft as a belt-and-suspenders fallback.
+    const mailBody = encodeURIComponent(
 `New Channel Partner Application — LocalAI TV
 
 Full Name:        ${name}
@@ -46,21 +76,8 @@ Why Partner:      ${whyPartner || 'Not mentioned'}
 
 Submitted on: ${new Date().toLocaleString('en-IN')}
 `);
-    const subject = encodeURIComponent(`Channel Partner Application — ${name} — ${constituency}`);
-    const applicationId = genComplianceId('CP');
-
-    // Best-effort backend submit
-    try {
-      apiCall('/partner-applications', { method:'POST', body: JSON.stringify({
-        application_id: applicationId,
-        full_name: name, mobile: phone, email, state, town_constituency: constituency,
-        current_work_business: occupation, experience_type: experience,
-        reason_to_join: whyPartner, agreed_to_rules: true, consent_to_contact: true,
-        status: 'New', created_at: new Date().toISOString(),
-      }) }).catch(()=>{});
-    } catch (e) { /* ignore */ }
-
-    window.open(`mailto:support@localaitv.com?subject=${subject}&body=${body}`);
+    const mailSubject = encodeURIComponent(`Channel Partner Application — ${name} — ${constituency}`);
+    window.open(`mailto:support@localaitv.com?subject=${mailSubject}&body=${mailBody}`);
     setSubmitted(true);
   }
 
