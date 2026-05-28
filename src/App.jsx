@@ -143,6 +143,10 @@ function App() {
   const [navActive, setNavActive]       = useState('home');
   const [selectedNews, setSelectedNews] = useState(null);
   const [selectedChannel, setSelectedChannel] = useState(null);
+  // When the bulletin player is opened from a channel's detail page, remember
+  // that channel so closing the player returns to it (and the player filters
+  // to that channel's district rather than the user's chosen location).
+  const [bulletinReturnChannel, setBulletinReturnChannel] = useState(null);
   const [isOffline, setIsOffline]       = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
   const [permSheet, setPermSheet]       = useState(null);
@@ -231,6 +235,8 @@ function App() {
   }
 
   function navigate(to) {
+    // Any explicit navigation cancels a pending "return to channel" hand-off.
+    setBulletinReturnChannel(null);
     // Screens that are "downstream" of the Upload home — pressing back from any of these
     // to 'upload' should go DIRECTLY to the upload home (8 tiles), bypassing registration.
     // Upload sub-forms that should NOT trigger the registration gate when
@@ -299,6 +305,12 @@ function App() {
         channel={selectedChannel}
         onBack={() => setSelectedChannel(null)}
         onOpenNews={(n) => { setSelectedChannel(null); setSelectedNews(n); }}
+        onOpenBulletin={(bulletinId) => {
+          if (typeof window !== 'undefined') window.__bulletinStartId = bulletinId;
+          setBulletinReturnChannel(selectedChannel);
+          setSelectedChannel(null);
+          setScreen('bulletinsfeed');
+        }}
       />
     );
 
@@ -432,7 +444,28 @@ function App() {
         }
         return <ClassifiedsFeedScreen onClose={()=>navigate('home')} startIdx={startIdx} startCat={preset || 'All'}/>;
       }
-      case 'bulletinsfeed': return <BulletinPlayerScreen startIdx={0} onClose={()=>navigate('home')} location={activeLocation} />;
+      case 'bulletinsfeed': {
+        // When opened from a channel detail page, filter to that channel's
+        // district and return there on close; otherwise use the user's chosen
+        // location and close to home (the home-rail behavior).
+        const fromChannel = bulletinReturnChannel;
+        const bulletinLoc = fromChannel
+          ? { id: fromChannel.location_id, name: fromChannel.name, nameEn: fromChannel.nameEn }
+          : activeLocation;
+        return <BulletinPlayerScreen
+          startIdx={0}
+          location={bulletinLoc}
+          onClose={()=>{
+            if (fromChannel) {
+              setBulletinReturnChannel(null);
+              setScreen('channels');
+              setSelectedChannel(fromChannel);
+            } else {
+              navigate('home');
+            }
+          }}
+        />;
+      }
       case 'newsfeed':        return <DistrictNewsFeedScreen onClose={()=>navigate('home')} startCat='All' startIdx={0}/>;  
       case 'whoswho':    return <WhosWhoScreen onBack={()=>navigate('local')} onNavigate={navigate} constituency={userConstituency||'Kurnool'} />;
       case 'utility':    return <UtilityScreen onBack={()=>navigate('local')} onNavigate={navigate} constituency={userConstituency||'Kurnool'} />;

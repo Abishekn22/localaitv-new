@@ -2,16 +2,26 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 
 import { LiveDot } from './../components/atoms.jsx';
+import { mapBulletin, filterBulletinsByLocation } from '../_imports.js';
 
-function ChannelDetailScreen({ channel, onBack, onOpenNews }) {
-  const [activeSeg, setActiveSeg] = useState(0);
-  const chNews = NEWS_ITEMS.filter(n => n.district === channel.name).concat(NEWS_ITEMS.slice(0,3));
+function ChannelDetailScreen({ channel, onBack, onOpenNews, onOpenBulletin }) {
+  // Filter tabs reuse BULLETIN_SEGS: [LOCAL, DISTRICT, STATE, NATIONAL, ADS].
+  // LOCAL (index 0) is the only one backed by real data today.
+  const [activeFilter, setActiveFilter] = useState(0);
 
-  // Auto-advance bulletin segment every 4 seconds for demo
-  useEffect(() => {
-    const t = setInterval(() => setActiveSeg(s => (s + 1) % BULLETIN_SEGS.length), 4000);
-    return () => clearInterval(t);
-  }, []);
+  // Previous bulletins for this district come from /api/bulletins. The backend
+  // returns location_id: 0, so filterBulletinsByLocation matches by name.
+  const { data: liveBulletins, loading: bulletinsLoading } = useAPI(
+    () => apiCall('/bulletins?page=1&limit=50').then(d => d.items || d),
+    [],
+    []
+  );
+  const localBulletins = useMemo(() => {
+    const items = Array.isArray(liveBulletins) ? liveBulletins : [];
+    return filterBulletinsByLocation(items, {
+      id: channel.location_id, name: channel.name, nameEn: channel.nameEn,
+    }).map(mapBulletin).filter(Boolean);
+  }, [liveBulletins, channel.location_id, channel.name, channel.nameEn]);
 
   return (
     <div style={{width:'100%',height:'100%',background:T.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
@@ -25,67 +35,38 @@ function ChannelDetailScreen({ channel, onBack, onOpenNews }) {
       </div>
 
       <div style={{flex:1,overflowY:'auto'}}>
-        {/* Video player */}
+        {/* Video player — real YouTube live embed (same stream the home hero plays) */}
         <div style={{width:'100%',height:210,background:'#000',position:'relative'}}>
-          <div style={{position:'absolute',inset:0,background:`linear-gradient(135deg,#1a0505,#050510)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:70,opacity:0.08}}>📺</div>
-          {channel.live && <div style={{position:'absolute',top:12,left:12,background:T.red,borderRadius:4,padding:'3px 10px',fontSize:9,fontWeight:700,letterSpacing:2,display:'flex',alignItems:'center',gap:4}}><LiveDot size={5}/>LIVE</div>}
-          <div style={{position:'absolute',top:12,right:12,background:'rgba(0,0,0,0.7)',color:T.text,fontSize:11,padding:'4px 10px',borderRadius:20}}>👁 3,421</div>
-          <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',width:56,height:56,background:`rgba(208,2,27,0.9)`,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,boxShadow:`0 0 30px ${T.red}55`,cursor:'pointer'}}>▶</div>
-          <div style={{position:'absolute',bottom:0,left:0,right:0,height:3,background:T.bg3}}>
-            <div style={{height:'100%',width:'35%',background:T.red}} />
-          </div>
+          <iframe
+            key={channel.id}
+            src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[channel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1`}
+            style={{width:'100%',height:'100%',border:'none',display:'block'}}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            title={`${channel.name} TV Live`}
+          />
+          {channel.live && <div style={{position:'absolute',top:12,left:12,background:T.red,borderRadius:4,padding:'3px 10px',fontSize:9,fontWeight:700,letterSpacing:2,display:'flex',alignItems:'center',gap:4,pointerEvents:'none'}}><LiveDot size={5}/>LIVE</div>}
         </div>
 
-        {/* ── BULLETIN SEGMENT INDICATOR ─────────────────── */}
+        {/* ── FILTER TABS — LOCAL / DISTRICT / STATE / NATIONAL / ADS ── */}
         <div style={{background:T.bg2,padding:'12px 14px',borderBottom:`1px solid ${T.border}`}}>
-
-          {/* Segment label */}
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-            <div style={{display:'flex',alignItems:'center',gap:6}}>
-              <div style={{width:8,height:8,borderRadius:'50%',background:BULLETIN_SEGS[activeSeg].color,animation:'blink 1s infinite'}}/>
-              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:BULLETIN_SEGS[activeSeg].color,letterSpacing:1}}>
-                NOW: {BULLETIN_SEGS[activeSeg].label}
-              </span>
-              <span style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:12,lineHeight:1.65,fontWeight:700,color:BULLETIN_SEGS[activeSeg].color,opacity:0.8}}>
-
-                {BULLETIN_SEGS[activeSeg].labelTe}
-              </span>
-            </div>
-            <span style={{fontSize:10,color:T.textMuted}}>15 min bulletin</span>
-          </div>
-
-          {/* Segment progress strip */}
-          <div style={{display:'flex',gap:3}}>
+          <div style={{display:'flex',gap:6}}>
             {BULLETIN_SEGS.map((seg, i) => (
-              <div
-                key={i}
-                onClick={() => setActiveSeg(i)}
+              <button
+                key={seg.label}
+                onClick={() => setActiveFilter(i)}
                 style={{
-                  flex: seg.mins,
-                  height: 28,
-                  borderRadius: 6,
-                  background: i === activeSeg ? seg.color : `${seg.color}22`,
-                  border: `1px solid ${i === activeSeg ? seg.color : `${seg.color}44`}`,
-                  display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
-                  cursor:'pointer',
-                  transition:'all 0.3s ease',
-                  position:'relative',
-                  overflow:'hidden',
+                  flex:1, padding:'8px 4px', borderRadius:8, cursor:'pointer',
+                  background: i === activeFilter ? seg.color : `${seg.color}1A`,
+                  border: `1px solid ${i === activeFilter ? seg.color : `${seg.color}44`}`,
+                  display:'flex', flexDirection:'column', alignItems:'center', gap:2,
+                  transition:'all 0.2s ease',
                 }}
               >
-                {/* Active segment fill animation */}
-                {i === activeSeg && (
-                  <div style={{position:'absolute',inset:0,background:`linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent)`,animation:'shimmer 1.5s infinite'}}/>
-                )}
-                <span style={{fontSize:7,fontWeight:800,letterSpacing:0.5,color:i===activeSeg?'white':seg.color}}>{seg.label}</span>
-                <span style={{fontSize:6,color:i===activeSeg?'rgba(255,255,255,0.7)':'rgba(255,255,255,0.3)'}}>{seg.mins}m</span>
-              </div>
+                <span style={{fontSize:9,fontWeight:800,letterSpacing:0.5,color:i===activeFilter?'white':seg.color}}>{seg.label}</span>
+                <span style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:9,color:i===activeFilter?'rgba(255,255,255,0.9)':seg.color}}>{seg.labelTe}</span>
+              </button>
             ))}
-          </div>
-
-          {/* Mini progress bar inside active segment */}
-          <div style={{marginTop:6,height:2,background:T.bg3,borderRadius:2,overflow:'hidden'}}>
-            <div style={{height:'100%',width:'60%',background:BULLETIN_SEGS[activeSeg].color,borderRadius:2,transition:'width 4s linear'}}/>
           </div>
         </div>
 
@@ -110,25 +91,48 @@ function ChannelDetailScreen({ channel, onBack, onOpenNews }) {
           </div>
         </div>
 
-        {/* Bulletins */}
+        {/* Filter content — LOCAL shows this district's previous bulletins from
+            /api/bulletins; the other tabs are placeholders until the backend
+            categorises bulletins by scope. */}
         <div style={{padding:'16px 18px'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:17}}>📋 Previous Bulletins</div>
-            <span style={{fontSize:11,color:T.gold,fontWeight:600,cursor:'pointer'}}>See All →</span>
-          </div>
-          {chNews.slice(0,5).map((n,i) => (
-            <div key={n.id} onClick={() => onOpenNews(n)} style={{display:'flex',gap:10,padding:'12px 0',borderBottom:`1px solid ${T.border}`,cursor:'pointer'}}>
-              <div style={{width:28,height:28,borderRadius:8,background:`rgba(208,2,27,0.15)`,color:T.red,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{i+1}</div>
-              <div style={{flex:1}}>
-                <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:14,fontWeight:700,color:T.text,lineHeight:1.65,marginBottom:4}}>{n.title}</div>
-                <div style={{fontSize:10,color:T.textMuted,display:'flex',gap:6}}>
-                  <span style={{color:i<2?T.red:T.gold}}>{['8:05 PM','6:30 PM','4:15 PM','2:00 PM','11:30 AM'][i]}</span>
-                  <span>·</span>
-                  <span>{n.views} views</span>
-                </div>
-              </div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:17,color:T.text}}>
+              📋 {BULLETIN_SEGS[activeFilter].label} — Previous Bulletins
             </div>
-          ))}
+          </div>
+
+          {activeFilter === 0 ? (
+            bulletinsLoading ? (
+              <div style={{textAlign:'center',padding:'28px 16px',color:T.textMuted,fontSize:13}}>Loading…</div>
+            ) : localBulletins.length > 0 ? (
+              localBulletins.map((b,i) => (
+                <div key={b.id ?? i} onClick={()=>onOpenBulletin && onOpenBulletin(b.id)}
+                  style={{display:'flex',gap:10,padding:'12px 0',borderBottom:`1px solid ${T.border}`,cursor:'pointer',alignItems:'center'}}>
+                  <div style={{width:28,height:28,borderRadius:8,background:`rgba(208,2,27,0.15)`,color:T.red,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{i+1}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:14,fontWeight:700,color:T.text,lineHeight:1.65,marginBottom:4}}>{b.titleTe || b.titleEn}</div>
+                    <div style={{fontSize:10,color:T.textMuted,display:'flex',gap:6,alignItems:'center'}}>
+                      {b.broadcastTime && <><span style={{color:T.gold}}>{b.broadcastTime}</span><span>·</span></>}
+                      <span>{b.channel}</span>
+                    </div>
+                  </div>
+                  <div style={{flexShrink:0,width:30,height:30,borderRadius:'50%',background:`rgba(208,2,27,0.12)`,border:`1px solid rgba(208,2,27,0.3)`,color:T.red,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12}}>▶</div>
+                </div>
+              ))
+            ) : (
+              <div style={{textAlign:'center',padding:'28px 16px',color:T.textMuted}}>
+                <div style={{fontSize:32,marginBottom:8}}>📭</div>
+                <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:4}}>No bulletins yet for {channel.name}</div>
+                <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:12}}>ఇంకా బులెటిన్‌లు లేవు</div>
+              </div>
+            )
+          ) : (
+            <div style={{textAlign:'center',padding:'28px 16px',color:T.textMuted}}>
+              <div style={{fontSize:32,marginBottom:8}}>🗓️</div>
+              <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:4}}>{BULLETIN_SEGS[activeFilter].label} — Coming soon</div>
+              <div style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontSize:12}}>త్వరలో</div>
+            </div>
+          )}
         </div>
         <div style={{height:20}} />
       </div>

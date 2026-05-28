@@ -3,26 +3,25 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import BottomNav from './../components/BottomNav.jsx';
 import { LocationPin } from './../components/atoms.jsx';
+import { getLocationIdFromName } from './../data/regions.js';
 
 function ChannelsScreen({ onNavigate, onOpenChannel }) {
   const { T } = useAppTheme();
   const [state, setState] = useState('AP');
 
-  const AP_TV = [
-    { id:'kur', en:'Kurnool',    te:'కర్నూలు',   viewers:1842, ytId:'BTRyZDiLbEE' },
-    { id:'gun', en:'Guntur',     te:'గుంటూరు',   viewers:2103, ytId:'FWilVnvR0Es'  },
-    { id:'nel', en:'Nellore',    te:'నెల్లూరు',  viewers:1247, ytId:'BTRyZDiLbEE' },
-    { id:'kak', en:'Kakinada',   te:'కాకినాడ',   viewers:983,  ytId:'2qyb8WBP75c'  },
-    { id:'tpt', en:'Tirupati',   te:'తిరుపతి',   viewers:1534, ytId:'ahb4disXmOU'  },
-  ];
-  const TG_TV = [
-    { id:'khm', en:'Khammam',    te:'ఖమ్మం',     viewers:1621, ytId:'2qyb8WBP75c'  },
-    { id:'kar', en:'Karimnagar', te:'కరీంనగర్',  viewers:1842, ytId:'t7OrzwZW-ss'  },
-    { id:'war', en:'Warangal',   te:'వరంగల్',    viewers:1387, ytId:'h_VEIP5tSxc'  },
-    { id:'nal', en:'Nalgonda',   te:'నల్గొండ',   viewers:798,  ytId:'PMzf6Tnyd-o'  },
-  ];
-  const list = state === 'AP' ? AP_TV : TG_TV;
-  const totalViewers = list.reduce((s,c)=>s+c.viewers,0);
+  // Live channels — same source the home page uses (LIVE_CHANNELS). Each is
+  // tagged with its backend location_id (resolved from English name + state);
+  // only channels that are live AND resolve to a real location_id are shown.
+  const liveWithIds = useMemo(
+    () => LIVE_CHANNELS
+      .map(c => ({ ...c, location_id: getLocationIdFromName(c.nameEn, c.state) }))
+      .filter(c => c.live && c.location_id != null),
+    []
+  );
+  const apCount = useMemo(() => liveWithIds.filter(c => c.state === 'AP').length, [liveWithIds]);
+  const tgCount = useMemo(() => liveWithIds.filter(c => c.state === 'TG').length, [liveWithIds]);
+  const list = useMemo(() => liveWithIds.filter(c => c.state === state), [liveWithIds, state]);
+  const totalViewers = list.reduce((s,c)=>s+(c.viewers||0),0);
 
   return (
     <div style={{width:'100%',height:'100%',background:T.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
@@ -48,8 +47,8 @@ function ChannelsScreen({ onNavigate, onOpenChannel }) {
         {/* State toggle — Telugu */}
         <div style={{display:'flex',gap:8}}>
           {[
-            {id:'AP',te:'ఆంధ్రప్రదేశ్',count:5},
-            {id:'TG',te:'తెలంగాణ',count:4},
+            {id:'AP',te:'ఆంధ్రప్రదేశ్',count:apCount},
+            {id:'TG',te:'తెలంగాణ',count:tgCount},
           ].map(s=>(
             <button key={s.id} onClick={()=>setState(s.id)}
               style={{flex:1,padding:'12px 8px',borderRadius:14,cursor:'pointer',transition:'all 0.2s',
@@ -82,11 +81,12 @@ function ChannelsScreen({ onNavigate, onOpenChannel }) {
         </div>
 
         {list.map(c=>{
-          const waMsg = encodeURIComponent(`📺 Watch ${c.en} TV live!\n📱 Download: https://localaitv.com/app`);
+          const waMsg = encodeURIComponent(`📺 Watch ${c.nameEn} TV live!\n📱 Download: https://localaitv.com/app`);
           return (
             <div key={c.id}
-              onClick={()=>onOpenChannel({id:c.id,name:c.te,nameEn:c.en,code:c.en.slice(0,3).toUpperCase()+'TV',
-                live:true,viewers:c.viewers,dist:c.dist,ytId:c.ytId})}
+              onClick={()=>onOpenChannel({ id:c.id, name:c.name, nameEn:c.nameEn, code:c.code,
+                live:c.live, viewers:c.viewers, state:c.state, location_id:c.location_id,
+                ytId: CHANNEL_VIDEO[c.id] || YT_LIVE_VIDEO })}
               style={{display:'flex',alignItems:'center',gap:14,padding:'16px',marginBottom:12,
                 borderRadius:18,background:T.bg2,border:`1.5px solid ${T.border}`,cursor:'pointer',
                 transition:'all 0.2s',boxShadow:T.isDark?'none':`0 2px 10px ${T.shadow}`}}
@@ -98,7 +98,7 @@ function ChannelsScreen({ onNavigate, onOpenChannel }) {
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:3}}>
                   <span style={{fontFamily:"'Noto Sans Telugu',sans-serif",fontWeight:700,
-                    fontSize:18,lineHeight:1.5,color:T.text}}>{c.te}</span>
+                    fontSize:18,lineHeight:1.5,color:T.text}}>{c.name}</span>
                   <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:600,
                     fontSize:11,color:T.textMuted}}>TV</span>
                 </div>
