@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
 import { useAuth } from '../../contexts/AuthContext.jsx';
-import { uploadMediaChunked, mediaKindOf, DIRECT_THRESHOLD, MAX_REPORT_FILE_BYTES } from '../../utils/reportUpload.js';
+import { uploadMediaChunked, mediaKindOf, MAX_REPORT_FILE_BYTES } from '../../utils/reportUpload.js';
 import MediaCaptureModal from '../../components/MediaCaptureModal.jsx';
 
 function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
@@ -9,12 +9,76 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
   const { user, token } = useAuth();
   // Live camera capture overlay: null | 'photo' | 'video'
   const [capture, setCapture] = useState(null);
+  // Recorded audio clips: { file, url } | null.
+  const [headlineAudio, setHeadlineAudio] = useState(null);
+  const [descriptionAudio, setDescriptionAudio] = useState(null);
+  // Full-screen preview of an added media file (index into mediaFiles) | null.
+  const [previewIdx, setPreviewIdx] = useState(null);
   // Add a captured/picked file to the media list (cap at 3).
   const addMediaFile = (f) => {
     if (!f) return;
     setMediaFiles(prev => (prev.length >= 3 ? prev : [...prev, f]));
     setMediaPreviews(prev => (prev.length >= 3 ? prev : [...prev, URL.createObjectURL(f)]));
   };
+
+  // ── Inline audio recording (no modal) — driven by each field's Record button.
+  const audioStreamRef   = useRef(null);
+  const audioRecorderRef = useRef(null);
+  const audioChunksRef   = useRef([]);
+  const audioTimerRef    = useRef(null);
+  const [audioRecording, setAudioRecording] = useState(null); // 'headline' | 'details' | null
+  const [audioSecs,      setAudioSecs]      = useState(0);
+  const audioFallbackFor = useRef(null); // field for the hidden <input> fallback
+
+  const storeFieldAudio = (field, file) => {
+    const clip = { file, url: URL.createObjectURL(file) };
+    const setter = field === 'headline' ? setHeadlineAudio : setDescriptionAudio;
+    setter(prev => { if (prev?.url) { try { URL.revokeObjectURL(prev.url); } catch (e) {} } return clip; });
+  };
+
+  async function startFieldAudio(field) {
+    if (audioRecording) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      audioFallbackFor.current = field;
+      document.getElementById('news-audio-input')?.click();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+      const mimeType = candidates.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) audioChunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const type = mr.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type });
+        const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+        const file = new File([blob], `news-audio-${field}-${Date.now()}.${ext}`, { type });
+        storeFieldAudio(field, file);
+        if (audioStreamRef.current) audioStreamRef.current.getTracks().forEach(t => t.stop());
+        audioStreamRef.current = null;
+      };
+      audioRecorderRef.current = mr;
+      mr.start();
+      setAudioRecording(field);
+      setAudioSecs(0);
+      audioTimerRef.current = setInterval(() => setAudioSecs(s => s + 1), 1000);
+    } catch (e) {
+      audioFallbackFor.current = field;
+      document.getElementById('news-audio-input')?.click();
+    }
+  }
+
+  function stopFieldAudio() {
+    if (audioTimerRef.current) { clearInterval(audioTimerRef.current); audioTimerRef.current = null; }
+    try { if (audioRecorderRef.current && audioRecorderRef.current.state === 'recording') audioRecorderRef.current.stop(); } catch (e) {}
+    setAudioRecording(null);
+  }
+
+  const toggleFieldAudio = (field) => { audioRecording === field ? stopFieldAudio() : startFieldAudio(field); };
+  const audioMMSS = `${String(Math.floor(audioSecs / 60)).padStart(2, '0')}:${String(audioSecs % 60).padStart(2, '0')}`;
   const [step,        setStep]        = useState(0); // 0=form, 1=uploading, 2=result
   const [headline,    setHeadline]    = useState('');
   const [details,     setDetails]     = useState('');
@@ -216,7 +280,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
     const wc  = details.trim()  ? details.trim().split(/\s+/).filter(Boolean).length  : 0;
     const headlineBad = hwc < 4 || hwc > 30;
     const detailsBad  = wc < 20 || wc > 300;
-    const mediaBad    = !mediaType || mediaPreviews.length === 0;
+    const mediaBad    = mediaPreviews.length === 0;
     const confirmBad  = !confirmed;
 
     if (headlineBad || detailsBad || mediaBad || confirmBad) {
@@ -253,60 +317,54 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
     setAiSteps([]);
 
     try {
-      // Split selected media by MIME; large files go through the chunked
-      // pipeline, small ones ride directly in the /reports FormData.
+      // 1) Upload every file → collect its stored path, grouped by type into
+      //    video_paths / image_paths / audio_paths. The headline/description
+      //    voice recordings are uploaded as audio and join audio_paths too.
       const video_paths = [], image_paths = [], audio_paths = [];
-      const directVideos = [], directImages = [], directAudios = [];
-      const chunkedBytes = mediaFiles
-        .filter(f => f.size > DIRECT_THRESHOLD)
-        .reduce((a, f) => a + f.size, 0);
+      const uploadJobs = [
+        ...mediaFiles.map(f => ({ file: f, kind: mediaKindOf(f) })),
+        ...(headlineAudio ? [{ file: headlineAudio.file, kind: 'audio' }] : []),
+        ...(descriptionAudio ? [{ file: descriptionAudio.file, kind: 'audio' }] : []),
+      ];
+      const totalBytes = uploadJobs.reduce((a, j) => a + j.file.size, 0) || 1;
       let doneBytes = 0;
 
-      for (const file of mediaFiles) {
-        const kind = mediaKindOf(file);
-        const pathsArr  = kind === 'video' ? video_paths  : kind === 'audio' ? audio_paths  : image_paths;
-        const directArr = kind === 'video' ? directVideos : kind === 'audio' ? directAudios : directImages;
-        if (file.size > DIRECT_THRESHOLD) {
-          const path = await uploadMediaChunked({
-            blob: file, kind, originalName: file.name, token,
-            onProgress: (frac) => {
-              const overall = chunkedBytes ? (doneBytes + frac * file.size) / chunkedBytes : 0;
-              setUploadPct(Math.min(90, Math.round(overall * 90)));
-            },
-          });
-          doneBytes += file.size;
-          pathsArr.push(path);
-        } else {
-          directArr.push(file);
-        }
+      for (const job of uploadJobs) {
+        const arr = job.kind === 'video' ? video_paths : job.kind === 'audio' ? audio_paths : image_paths;
+        const path = await uploadMediaChunked({
+          blob: job.file, kind: job.kind, originalName: job.file.name, token,
+          onProgress: (frac) => {
+            const overall = (doneBytes + frac * job.file.size) / totalBytes;
+            setUploadPct(Math.min(90, Math.round(overall * 90)));
+          },
+        });
+        doneBytes += job.file.size;
+        arr.push(path);
       }
-      setUploadPct(prev => Math.max(prev, 92));
+      setUploadPct(92);
 
-      // One FormData for POST /reports — field names must match the backend
-      // validator / upload.fields config exactly.
-      const fd = new FormData();
-      fd.append('name', (user?.name || '').trim());
-      fd.append('email', user?.email || '');
-      fd.append('subject', headline.trim());
-      fd.append('location', (location || '').trim());
-      fd.append('message', details.trim());
-      fd.append('video_paths', JSON.stringify(video_paths));
-      fd.append('image_paths', JSON.stringify(image_paths));
-      fd.append('audio_paths', JSON.stringify(audio_paths));
-      directVideos.forEach(f => fd.append('video', f));
-      directImages.forEach(f => fd.append('image', f));
-      directAudios.forEach(f => fd.append('audio', f));
+      // 2) POST /api/reports — JSON body with the path arrays (matches the
+      //    documented report request shape).
+      const payload = {
+        name: (user?.name || '').trim(),
+        email: user?.email || '',
+        headlines: headline.trim(),
+        message: details.trim(),
+        location: (location || '').trim(),
+        video_paths,
+        image_paths,
+        audio_paths,
+      };
 
-      // FormData request → Authorization only, never set Content-Type.
       const res = await fetch(`${API_BASE}/reports`, {
         method: 'POST',
-        headers: { Authorization: 'Bearer ' + token },
-        body: fd,
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => null);
-        const msg = (d && d.message)
-          || (d && Array.isArray(d.errors) ? d.errors.map(e => e.msg).filter(Boolean).join('\n') : '')
+        const msg = (d && (d.message || d.error))
+          || (d && Array.isArray(d.errors) ? d.errors.map(e => e.msg || e.message).filter(Boolean).join('\n') : '')
           || `Submission failed (${res.status}).`;
         setStep(0);
         setValidationError(msg);
@@ -476,7 +534,6 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
             {/* PHOTO — square, English only */}
             <button onClick={()=>{
-              if(mediaType!=='photo'){setMediaFiles([]);setMediaPreviews([]);}
               if(mediaPreviews.length>=3){alert('Maximum allowed is 3 files.');return;}
               setMediaType('photo');
               setCapture('photo');
@@ -519,7 +576,6 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
             {/* VIDEO — square, English only */}
             <button onClick={()=>{
-              if(mediaType!=='video'){setMediaFiles([]);setMediaPreviews([]);}
               if(mediaPreviews.length>=3){alert('Maximum allowed is 3 files.');return;}
               setMediaType('video');
               setCapture('video');
@@ -562,7 +618,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
             {/* LIBRARY — square, English only */}
             <button onClick={()=>{
-              if(mediaType!=='text'){setMediaFiles([]);setMediaPreviews([]);}
+              if(mediaPreviews.length>=3){alert('Maximum allowed is 3 files.');return;}
               setMediaType('text');
               document.getElementById('news-library-input')?.click();
             }}
@@ -619,18 +675,20 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
               setMediaPreviews(prev=>[...prev,URL.createObjectURL(f)]);
               e.target.value='';
             }}/>
-          {/* Library — opens file picker, photos and videos from gallery */}
-          <input id="news-library-input" type="file" accept="image/*,video/*"
+          {/* Library — opens file picker, multiple photos/videos from gallery */}
+          <input id="news-library-input" type="file" accept="image/*,video/*" multiple
             style={{display:'none'}} onChange={e=>{
-              const f = e.target.files?.[0]; if(!f) return;
-              if(mediaPreviews.length >= 3) { e.target.value=''; alert('Maximum allowed is 3 files.'); return; }
-              setMediaFiles(prev=>[...prev,f]);
-              setMediaPreviews(prev=>[...prev,URL.createObjectURL(f)]);
+              const picked = Array.from(e.target.files || []);
+              if(!picked.length) return;
+              const room = 3 - mediaPreviews.length;
+              if(room <= 0){ e.target.value=''; alert('Maximum allowed is 3 files.'); return; }
+              if(picked.length > room) alert(`Only ${room} more file(s) can be added (3 max).`);
+              picked.slice(0, room).forEach(addMediaFile);
               e.target.value='';
             }}/>
 
           {/* Uploaded thumbnails — same square size as the buttons */}
-          {(mediaType==='photo'||mediaType==='video'||mediaType==='text') && (
+          {mediaPreviews.length > 0 && (
             <div style={{display:'flex',gap:8}}>
               {mediaPreviews.map((src,i)=>{
                 const file = mediaFiles[i];
@@ -639,21 +697,21 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
                   <div key={i} style={{flex:1,aspectRatio:'1',position:'relative',borderRadius:12,overflow:'hidden',
                     border:`1.5px solid ${T.border}`,background:'#000',flexShrink:0,
                     display:'flex',flexDirection:'column'}}>
-                    {/* Media area */}
-                    <div style={{flex:1,position:'relative',overflow:'hidden',background:'#000'}}>
+                    {/* Media area — tap to preview full-screen */}
+                    <div onClick={()=>setPreviewIdx(i)} style={{flex:1,position:'relative',overflow:'hidden',background:'#000',cursor:'pointer'}}>
                       {isVideo ? (
                         <>
-                          <video src={src} preload="metadata" muted
+                          <video src={src} preload="metadata" muted playsInline
                             style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
                           {/* Play button overlay */}
                           <div style={{
                             position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
-                            width:30,height:30,borderRadius:'50%',
+                            width:34,height:34,borderRadius:'50%',
                             background:'rgba(255,255,255,0.92)',
                             display:'flex',alignItems:'center',justifyContent:'center',
                             boxShadow:'0 2px 6px rgba(0,0,0,0.4)',pointerEvents:'none',
                           }}>
-                            <svg width={12} height={12} viewBox="0 0 24 24" fill="#D0021B">
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="#D0021B">
                               <polygon points="5,3 19,12 5,21"/>
                             </svg>
                           </div>
@@ -661,6 +719,10 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
                       ) : (
                         <img src={src} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
                       )}
+                      <div style={{position:'absolute',top:5,left:5,background:'rgba(0,0,0,0.6)',color:'#fff',fontSize:8,fontWeight:800,letterSpacing:0.5,borderRadius:5,padding:'2px 6px',fontFamily:"'Barlow Condensed',sans-serif"}}>
+                        {isVideo?'VIDEO':'PHOTO'}
+                      </div>
+                      <div style={{position:'absolute',bottom:5,right:5,background:'rgba(0,0,0,0.6)',color:'#fff',fontSize:8,fontWeight:700,borderRadius:5,padding:'2px 6px'}}>👁 View</div>
                     </div>
                     {/* Delete bar at bottom */}
                     <button onClick={()=>{
@@ -678,18 +740,14 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
               {/* Add slot — shown while < 3 uploaded */}
               {mediaPreviews.length < 3 && (
-                <div onClick={()=>{
-                    if(mediaType==='photo') setCapture('photo');
-                    else if(mediaType==='video') setCapture('video');
-                    else document.getElementById('news-library-input')?.click();
-                  }}
+                <div onClick={()=>document.getElementById('news-library-input')?.click()}
                   style={{flex:1,aspectRatio:'1',borderRadius:12,
                     border:`1.5px dashed ${T.border}`,background:T.bg3,
                     display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
                     gap:4,cursor:'pointer',flexShrink:0}}>
                   <span style={{fontSize:26,color:T.textMuted,lineHeight:1}}>＋</span>
                   <span style={{fontSize:9,color:T.textMuted,fontWeight:700}}>
-                    {mediaType==='photo'?'Add Photo':mediaType==='video'?'Add Video':'Add File'}
+                    Add File
                   </span>
                 </div>
               )}
@@ -747,41 +805,44 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
             <div style={{fontSize:12,color:T.textMuted,fontWeight:600,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>
               {headline.trim() ? headline.trim().split(/\s+/).filter(Boolean).length : 0} పదాలు <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,color:T.textMuted}}>/ words</span>
             </div>
-            {VOICE_SUPPORTED && (
-              <button onClick={() => voiceField==='headline'?stopVoice():startVoice('headline')}
-                onMouseEnter={e=>{
-                  e.currentTarget.style.transform='translateY(-2px) scale(1.06)';
-                  e.currentTarget.style.boxShadow='0 6px 18px rgba(208,2,27,0.6)';
-                  e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
-                }}
-                onMouseLeave={e=>{
-                  e.currentTarget.style.transform='translateY(0) scale(1)';
-                  e.currentTarget.style.boxShadow='0 2px 10px rgba(208,2,27,0.35)';
-                  e.currentTarget.style.background = voiceField==='headline'
-                    ?'linear-gradient(135deg,#9A0015,#D0021B)'
-                    :'linear-gradient(135deg,#E8001E,#B0001A)';
-                }}
-                style={{
-                  background: voiceField==='headline'
-                    ?'linear-gradient(135deg,#9A0015,#D0021B)'
-                    :'linear-gradient(135deg,#E8001E,#B0001A)',
-                  border:'none', borderRadius:24, padding:'8px 18px',
-                  color:'white', fontSize:12, fontWeight:800, letterSpacing:0.5,
-                  cursor:'pointer',
-                  display:'flex', alignItems:'center', gap:7,
-                  boxShadow:'0 2px 10px rgba(208,2,27,0.35)',
-                  transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-                }}>
-                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="2" width="6" height="11" rx="3"/>
-                  <path d="M5 10a7 7 0 0014 0"/>
-                  <line x1="12" y1="19" x2="12" y2="22"/>
-                  <line x1="8" y1="22" x2="16" y2="22"/>
-                </svg>
-                <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>{voiceField==='headline'?'ఆపండి / Stop':'రికార్డ్ / Record'}</span>
-              </button>
-            )}
+            <button onClick={()=>toggleFieldAudio('headline')}
+              style={{
+                background: audioRecording==='headline'
+                  ?'linear-gradient(135deg,#9A0015,#D0021B)'
+                  :'linear-gradient(135deg,#E8001E,#B0001A)',
+                border:'none', borderRadius:24, padding:'8px 18px',
+                color:'white', fontSize:12, fontWeight:800, letterSpacing:0.5,
+                cursor:'pointer', display:'flex', alignItems:'center', gap:7,
+                boxShadow:'0 2px 10px rgba(208,2,27,0.35)',
+                animation: audioRecording==='headline' ? 'pulse 1s infinite' : 'none',
+              }}>
+              {audioRecording==='headline' ? (
+                <>
+                  <span style={{width:9,height:9,borderRadius:'50%',background:'#fff'}}/>
+                  <span style={{fontVariantNumeric:'tabular-nums',letterSpacing:1}}>{audioMMSS}</span>
+                  <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>ఆపండి / Stop</span>
+                </>
+              ) : (
+                <>
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3"/>
+                    <path d="M5 10a7 7 0 0014 0"/>
+                    <line x1="12" y1="19" x2="12" y2="22"/>
+                    <line x1="8" y1="22" x2="16" y2="22"/>
+                  </svg>
+                  <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>రికార్డ్ / Record</span>
+                </>
+              )}
+            </button>
           </div>
+          {/* Recorded headline audio — playback preview */}
+          {headlineAudio && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'8px 10px'}}>
+              <audio src={headlineAudio.url} controls style={{flex:1,height:34}}/>
+              <button onClick={()=>{ try{URL.revokeObjectURL(headlineAudio.url);}catch(e){} setHeadlineAudio(null); }}
+                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:'none',background:'rgba(208,2,27,0.92)',color:'white',fontSize:14,fontWeight:800,cursor:'pointer'}}>✕</button>
+            </div>
+          )}
         </div>
 
         {/* ── DESCRIBE THE INCIDENT (card) ── */}
@@ -833,43 +894,46 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
                   </div>
                   <div style={{fontSize:10,color:T.textMuted}}>min 20 · max 300</div>
                 </div>
-                {VOICE_SUPPORTED && (
-                  <button onClick={() => voiceField==='details'?stopVoice():startVoice('details')}
-                    onMouseEnter={e=>{
-                      e.currentTarget.style.transform='translateY(-2px) scale(1.06)';
-                      e.currentTarget.style.boxShadow='0 6px 18px rgba(208,2,27,0.6)';
-                      e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
-                    }}
-                    onMouseLeave={e=>{
-                      e.currentTarget.style.transform='translateY(0) scale(1)';
-                      e.currentTarget.style.boxShadow='0 2px 10px rgba(208,2,27,0.35)';
-                      e.currentTarget.style.background = voiceField==='details'
-                        ?'linear-gradient(135deg,#9A0015,#D0021B)'
-                        :'linear-gradient(135deg,#E8001E,#B0001A)';
-                    }}
-                    style={{
-                      background: voiceField==='details'
-                        ?'linear-gradient(135deg,#9A0015,#D0021B)'
-                        :'linear-gradient(135deg,#E8001E,#B0001A)',
-                      border:'none', borderRadius:24, padding:'8px 18px',
-                      color:'white', fontSize:12, fontWeight:800, letterSpacing:0.5,
-                      cursor:'pointer',
-                      display:'flex', alignItems:'center', gap:7,
-                      boxShadow:'0 2px 10px rgba(208,2,27,0.35)',
-                      transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-                    }}>
-                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="2" width="6" height="11" rx="3"/>
-                      <path d="M5 10a7 7 0 0014 0"/>
-                      <line x1="12" y1="19" x2="12" y2="22"/>
-                      <line x1="8" y1="22" x2="16" y2="22"/>
-                    </svg>
-                    <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>{voiceField==='details'?'ఆపండి / Stop':'రికార్డ్ / Record'}</span>
-                  </button>
-                )}
+                <button onClick={()=>toggleFieldAudio('details')}
+                  style={{
+                    background: audioRecording==='details'
+                      ?'linear-gradient(135deg,#9A0015,#D0021B)'
+                      :'linear-gradient(135deg,#E8001E,#B0001A)',
+                    border:'none', borderRadius:24, padding:'8px 18px',
+                    color:'white', fontSize:12, fontWeight:800, letterSpacing:0.5,
+                    cursor:'pointer', display:'flex', alignItems:'center', gap:7,
+                    boxShadow:'0 2px 10px rgba(208,2,27,0.35)', flexShrink:0,
+                    animation: audioRecording==='details' ? 'pulse 1s infinite' : 'none',
+                  }}>
+                  {audioRecording==='details' ? (
+                    <>
+                      <span style={{width:9,height:9,borderRadius:'50%',background:'#fff'}}/>
+                      <span style={{fontVariantNumeric:'tabular-nums',letterSpacing:1}}>{audioMMSS}</span>
+                      <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>ఆపండి / Stop</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="2" width="6" height="11" rx="3"/>
+                        <path d="M5 10a7 7 0 0014 0"/>
+                        <line x1="12" y1="19" x2="12" y2="22"/>
+                        <line x1="8" y1="22" x2="16" y2="22"/>
+                      </svg>
+                      <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>రికార్డ్ / Record</span>
+                    </>
+                  )}
+                </button>
               </div>
             );
           })()}
+          {/* Recorded description audio — playback preview */}
+          {descriptionAudio && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'8px 10px'}}>
+              <audio src={descriptionAudio.url} controls style={{flex:1,height:34}}/>
+              <button onClick={()=>{ try{URL.revokeObjectURL(descriptionAudio.url);}catch(e){} setDescriptionAudio(null); }}
+                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:'none',background:'rgba(208,2,27,0.92)',color:'white',fontSize:14,fontWeight:800,cursor:'pointer'}}>✕</button>
+            </div>
+          )}
         </div>
 
         {/* ── LOCATION (card) ── */}
@@ -1015,7 +1079,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
         {(() => {
           const wc = details.trim() ? details.trim().split(/\s+/).filter(Boolean).length : 0;
           const hwc = headline.trim() ? headline.trim().split(/\s+/).filter(Boolean).length : 0;
-          const canSubmit = headline.trim() && hwc >= 4 && hwc <= 30 && wc >= 20 && wc <= 300 && mediaType && mediaPreviews.length > 0 && confirmed;
+          const canSubmit = headline.trim() && hwc >= 4 && hwc <= 30 && wc >= 20 && wc <= 300 && mediaPreviews.length > 0 && confirmed;
           // NOTE: We intentionally do NOT disable the button — clicking always runs validation
           // so the user sees an inline red banner explaining what's missing, instead of a dead button.
           return (
@@ -1028,8 +1092,12 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
         })()}
       </div>
 
-      {/* Live camera capture (photo / video) — opens the real camera on
-          desktop + mobile; falls back to the hidden file inputs on error. */}
+      {/* Hidden audio fallback input (used if inline mic recording is unavailable) */}
+      <input id="news-audio-input" type="file" accept="audio/*" style={{display:'none'}}
+        onChange={e=>{ const f=e.target.files?.[0]; if(f && audioFallbackFor.current){ storeFieldAudio(audioFallbackFor.current, f); audioFallbackFor.current=null; } e.target.value=''; }}/>
+
+      {/* Live camera capture (photo / video) — opens the real camera on desktop
+          + mobile; falls back to the hidden file inputs on error. */}
       {capture && (
         <MediaCaptureModal
           mode={capture}
@@ -1042,6 +1110,30 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
           }}
         />
       )}
+
+      {/* Full-screen preview of an added media file (photo / video) */}
+      {previewIdx !== null && mediaPreviews[previewIdx] && (() => {
+        const f = mediaFiles[previewIdx];
+        const isVid = f && f.type && f.type.startsWith('video/');
+        const isAud = f && f.type && f.type.startsWith('audio/');
+        return (
+          <div onClick={()=>setPreviewIdx(null)}
+            style={{position:'fixed',inset:0,zIndex:3500,background:'rgba(0,0,0,0.94)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <button type="button" onClick={(e)=>{e.stopPropagation();setPreviewIdx(null);}}
+              style={{position:'absolute',top:16,right:16,width:40,height:40,borderRadius:'50%',border:'none',background:'rgba(255,255,255,0.15)',color:'white',fontSize:20,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1}}>✕</button>
+            {isVid ? (
+              <video src={mediaPreviews[previewIdx]} controls autoPlay playsInline onClick={e=>e.stopPropagation()} style={{maxWidth:'100%',maxHeight:'85vh',borderRadius:12,background:'#000'}}/>
+            ) : isAud ? (
+              <audio src={mediaPreviews[previewIdx]} controls autoPlay onClick={e=>e.stopPropagation()} style={{width:'90%'}}/>
+            ) : (
+              <img src={mediaPreviews[previewIdx]} alt="preview" onClick={e=>e.stopPropagation()} style={{maxWidth:'100%',maxHeight:'85vh',objectFit:'contain',borderRadius:12}}/>
+            )}
+            <div style={{position:'absolute',bottom:18,left:0,right:0,textAlign:'center',color:'rgba(255,255,255,0.65)',fontSize:12}}>
+              {previewIdx+1} / {mediaPreviews.length} · tap outside to close
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 
