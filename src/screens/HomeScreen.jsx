@@ -6,7 +6,6 @@ import { mapIncidentToShort, resolveMediaUrl } from './../data/incidents.js';
 import BottomNav from './../components/BottomNav.jsx';
 import ClassifiedsSection from './../components/Sections/ClassifiedsSection.jsx';
 import DistrictNewsFeedScreen from './DistrictNewsFeedScreen.jsx';
-import FeaturedStoryHero from './../components/Sections/FeaturedStoryHero.jsx';
 import LiveActivityStrip from './../components/LiveActivityStrip.jsx';
 import LiveStrip from './../components/Sections/LiveStrip.jsx';
 import Logo from './../components/Logo.jsx';
@@ -17,9 +16,15 @@ import UnifiedFeedViewer from './../components/Feed/UnifiedFeedViewer.jsx';
 import UploadCtaBanner from './../components/Sections/UploadCtaBanner.jsx';
 import { LocationPin, LiveDot, FooterLink } from './../components/atoms.jsx';
 import { ShortNewsSection } from './../components/Sections/ShortNewsSection.jsx';
+import { useAuth } from './../contexts/AuthContext.jsx';
 
 function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstituency, userState, onChangeLocation }) {
   const { T, isDark, toggleTheme } = useAppTheme();
+  // Signed-in user drives the hamburger header. When logged out, show a
+  // generic "Guest" prompt instead of stale data.
+  const { user, isAuthenticated, logout } = useAuth();
+  const displayName   = isAuthenticated ? (user?.name || 'User') : 'Guest';
+  const avatarInitial = (displayName.trim().charAt(0) || 'G').toUpperCase();
   // Resolve the live channel from the constituency the user picked in the
   // onboarding LocationPicker (userConstituency = LIVE_CHANNELS[].nameEn, e.g. "Tirupati").
   // Falls back to the first channel only when there is no match (e.g. not yet picked).
@@ -559,14 +564,26 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                 fontWeight:900, fontSize:22, color:'#D0021B',
                 flexShrink:0,
                 boxShadow:'0 2px 8px rgba(0,0,0,0.15)',
-              }}>M</div>
+              }}>{avatarInitial}</div>
               {/* Name */}
               <div style={{flex:1, minWidth:0}}>
                 <div style={{
                   fontFamily:"'Barlow',sans-serif",
                   fontWeight:700, fontSize:18, color:'#FFFFFF',
                   overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
-                }}>Mohan Reddy Koneti</div>
+                }}>{displayName}</div>
+                {!isAuthenticated && (
+                  <button
+                    onClick={()=>{ setShowHamburger(false); onNavigate('profile'); }}
+                    style={{
+                      marginTop:2, padding:0, background:'transparent', border:'none',
+                      cursor:'pointer', textAlign:'left',
+                      fontFamily:"'Barlow',sans-serif", fontWeight:600, fontSize:12.5,
+                      color:'rgba(255,255,255,0.92)', textDecoration:'underline',
+                    }}>
+                    Sign in / లాగిన్
+                  </button>
+                )}
               </div>
               {/* Close X */}
               <button onClick={()=>setShowHamburger(false)} style={{
@@ -696,26 +713,28 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               <div style={{height:24}}/>
             </div>
 
-            {/* ── Logout button pinned at the bottom ── */}
-            <div style={{padding:'12px 14px 22px', flexShrink:0, background:'#FFFFFF'}}>
-              <button onClick={()=>{ setShowHamburger(false); /* logout flow */ }}
-                style={{
-                  width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:10,
-                  background:'linear-gradient(135deg,#E8001E,#D0021B)',
-                  border:'none', borderRadius:14, padding:'14px',
-                  fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:16,
-                  color:'#FFFFFF', cursor:'pointer',
-                  boxShadow:'0 4px 16px rgba(208,2,27,0.4)',
-                }}>
-                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="white"
-                  strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-                Logout
-              </button>
-            </div>
+            {/* ── Logout button pinned at the bottom (signed-in users only) ── */}
+            {isAuthenticated && (
+              <div style={{padding:'12px 14px 22px', flexShrink:0, background:'#FFFFFF'}}>
+                <button onClick={()=>{ setShowHamburger(false); logout(); onNavigate('home'); }}
+                  style={{
+                    width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+                    background:'linear-gradient(135deg,#E8001E,#D0021B)',
+                    border:'none', borderRadius:14, padding:'14px',
+                    fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:16,
+                    color:'#FFFFFF', cursor:'pointer',
+                    boxShadow:'0 4px 16px rgba(208,2,27,0.4)',
+                  }}>
+                  <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="white"
+                    strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1246,21 +1265,6 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         {/* ══ ROTATING UPLOAD CTA — two messages swap every 3.5s ══ */}
         <Reveal>
           <UploadCtaBanner onNavigate={onNavigate} />
-        </Reveal>
-
-        {/* ══ FEATURED STORY HERO — Phase 4 editorial drama ══════════
-            Singular dominant lead-story card. Pulls the top item from
-            /api/incidents (the same feed that powers the Top Stories
-            rail below). NOT a rail — sits ABOVE Classifieds as a one-off
-            hero. Tap opens the same DistrictNewsFeedScreen overlay the
-            Top Stories cards do, pinned at the hero's incident
-            (index 0 in the sorted feed). */}
-        <Reveal delay={0.04}>
-          <FeaturedStoryHero
-            item={incidentsRailItems[0]}
-            loading={incidentsLoading && incidentsRailItems.length === 0}
-            onOpenNews={() => setTopStoriesViewerIdx(0)}
-          />
         </Reveal>
 
         {/* ── CLASSIFIEDS (Kurnool Local) — moved to top per request ─ */}

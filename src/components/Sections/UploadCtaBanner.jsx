@@ -25,10 +25,9 @@ function UploadCtaBanner({ onNavigate }) {
   ];
   const cur = SLIDES[slot];
 
-  // OTT cinematic-news reskin — deep navy surface with a strong red glow accent
-  // and a subtle inner highlight. Replaces the old grey banner.
-  const BG_DEFAULT  = `linear-gradient(135deg, ${OTT.color.bg2} 0%, ${OTT.color.bg3} 100%)`;
-  const BG_HOVER    = `linear-gradient(135deg, ${OTT.color.bg3} 0%, #232A3D 100%)`;
+  // Navy-blue register banner — brighter, saturated navy per design screenshot.
+  const BG_DEFAULT  = `linear-gradient(135deg, #15294F 0%, #1E3C6B 100%)`;
+  const BG_HOVER    = `linear-gradient(135deg, #1E3C6B 0%, #27508A 100%)`;
   const BORDER      = OTT.color.lineStrong;
   const ACCENT_LEFT = OTT.color.red;       // premium red accent strip
   const TXT_PRIMARY = OTT.color.text;

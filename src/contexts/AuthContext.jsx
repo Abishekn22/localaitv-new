@@ -60,6 +60,10 @@ export function AuthProvider({ children }) {
     try {
       localStorage.removeItem(STORAGE_KEY_TOKEN);
       localStorage.removeItem(STORAGE_KEY_USER);
+      // Also clear the legacy registration-profile keys App.jsx writes, so no
+      // stale identity (name / mobile / photo) lingers after sign-out.
+      localStorage.removeItem('localaitv_user_profile');
+      localStorage.removeItem('localaitv_registered');
     } catch {}
   }, []);
 
