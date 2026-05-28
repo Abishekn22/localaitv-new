@@ -17,6 +17,7 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
   const [otpRequested, setOtpRequested] = useState(false);
   const [photo, setPhoto] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(userProfile?.photo || null);
+  const [showCamera, setShowCamera] = useState(false);
   const [showChannelDropdown, setShowChannelDropdown] = useState(false);
   const [dropStep, setDropStep] = useState('state');   // 'state' | 'constituency' — same as home page
   const [dropState, setDropState] = useState(null);    // 'AP' | 'TG'
@@ -539,7 +540,7 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
                 }
               </div>
               <div style={{flex:1,display:'flex',gap:8}}>
-                <button type="button" onClick={()=>document.getElementById('reg-photo-camera')?.click()}
+                <button type="button" onClick={()=>setShowCamera(true)}
                   onMouseEnter={e=>{
                     e.currentTarget.style.transform='translateY(-2px)';
                     e.currentTarget.style.boxShadow='0 6px 18px rgba(208,2,27,0.5)';
@@ -689,7 +690,135 @@ function UploadRegistrationScreen({ onNavigate, userProfile, userConstituency, u
         </button>
       </div>
 
+      {showCamera && (
+        <CameraCaptureModal
+          onClose={()=>setShowCamera(false)}
+          onCapture={(file)=>{ setPhoto(file); setPhotoPreview(URL.createObjectURL(file)); setShowCamera(false); }}
+          onFallback={()=>{ setShowCamera(false); document.getElementById('reg-photo-camera')?.click(); }}
+        />
+      )}
+
       <BottomNav active="upload" onChange={onNavigate} />
+    </div>
+  );
+}
+
+// ── Live-camera capture modal (front camera) ──────────────────
+// Opened by the "Photo" button. Uses getUserMedia so the real camera
+// opens on desktop AND mobile — the HTML `capture` attribute is ignored
+// by desktop browsers, so a file input alone can't open a webcam there.
+// On error / denied permission it falls back to the #reg-photo-camera
+// file input (native camera on mobile, file picker on desktop).
+function CameraCaptureModal({ onClose, onCapture, onFallback }) {
+  const { T } = useAppTheme();
+  const videoRef  = useRef(null);
+  const streamRef = useRef(null);
+  const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function start() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError('Camera is not available in this browser.');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' }, audio: false,
+        });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+        setReady(true);
+      } catch (e) {
+        setError(e && e.name === 'NotAllowedError'
+          ? 'Camera permission denied. Allow access, or pick a photo from your files.'
+          : 'Could not open the camera. Pick a photo from your files instead.');
+      }
+    }
+    start();
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  function stopStream() {
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+  }
+
+  function handleCapture() {
+    const video = videoRef.current;
+    if (!video) return;
+    const w = video.videoWidth  || 720;
+    const h = video.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    // Mirror so the saved image matches the mirrored selfie preview.
+    ctx.translate(w, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, w, h);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], `profile-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      stopStream();
+      onCapture(file);
+    }, 'image/jpeg', 0.9);
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:2000,background:'rgba(0,0,0,0.92)',
+      display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:16}}>
+      <button type="button" onClick={()=>{ stopStream(); onClose(); }}
+        style={{position:'absolute',top:16,right:16,width:40,height:40,borderRadius:'50%',
+          border:'none',background:'rgba(255,255,255,0.15)',color:'white',fontSize:20,
+          cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+
+      <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontWeight:800,fontSize:15,color:'white',marginBottom:14}}>
+        ఫోటో తీయండి · Take a Photo
+      </div>
+
+      {error ? (
+        <div style={{maxWidth:340,textAlign:'center'}}>
+          <div style={{fontSize:13,color:'#FFD2D2',background:'rgba(208,2,27,0.18)',
+            border:'1px solid rgba(208,2,27,0.4)',borderRadius:12,padding:'14px 16px',lineHeight:1.5,marginBottom:16}}>
+            {error}
+          </div>
+          <button type="button" onClick={()=>{ stopStream(); onFallback(); }}
+            style={{background:'linear-gradient(135deg,#E8001E,#B0001A)',color:'white',border:'none',
+              borderRadius:12,padding:'12px 20px',fontSize:13,fontWeight:800,cursor:'pointer'}}>
+            Choose from Files
+          </button>
+        </div>
+      ) : (
+        <>
+          <div style={{width:'100%',maxWidth:360,aspectRatio:'3 / 4',borderRadius:16,overflow:'hidden',
+            background:'#000',border:'2px solid rgba(255,255,255,0.18)',position:'relative'}}>
+            <video ref={videoRef} playsInline muted
+              style={{width:'100%',height:'100%',objectFit:'cover',transform:'scaleX(-1)'}}/>
+            {!ready && (
+              <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',
+                color:'rgba(255,255,255,0.7)',fontSize:13}}>Starting camera…</div>
+            )}
+          </div>
+          <div style={{display:'flex',gap:18,marginTop:20,alignItems:'center'}}>
+            <button type="button" onClick={()=>{ stopStream(); onFallback(); }}
+              style={{background:'rgba(255,255,255,0.12)',color:'white',border:'1px solid rgba(255,255,255,0.25)',
+                borderRadius:12,padding:'12px 18px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+              Files
+            </button>
+            <button type="button" onClick={handleCapture} disabled={!ready}
+              aria-label="Capture photo"
+              style={{width:68,height:68,borderRadius:'50%',border:'4px solid rgba(255,255,255,0.85)',
+                background:ready?'#E8001E':'#888',cursor:ready?'pointer':'not-allowed',
+                boxShadow:'0 4px 16px rgba(208,2,27,0.5)'}}/>
+          </div>
+        </>
+      )}
     </div>
   );
 }

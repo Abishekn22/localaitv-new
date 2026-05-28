@@ -253,10 +253,9 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     () => (Array.isArray(liveIncidents) ? liveIncidents.map(mapIncidentToRailItem) : []),
     [liveIncidents]
   );
-  // Top Stories rail skips the first incident — it's already promoted to
-  // the FeaturedStoryHero above. Slice (1, 11) so we keep up to 10 items
-  // in the rail without visually duplicating the lead.
-  const filteredHome = useMemo(() => incidentsRailItems.slice(1, 11), [incidentsRailItems]);
+  // Top Stories rail shows the newest 10 incidents (indices 0–9). The newest
+  // one (index 0) renders as the big LEAD STORY card; the rest are secondary.
+  const filteredHome = useMemo(() => incidentsRailItems.slice(0, 10), [incidentsRailItems]);
 
   return (
     <div className="ott-screen-in"
