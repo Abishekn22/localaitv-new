@@ -1,17 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css, genComplianceId } from '../../_imports.js';
+import { useAuth } from '../../contexts/AuthContext.jsx';
 
 function AdvertiseScreen({ onBack }) {
   const { T } = useAppTheme();
+  const { token } = useAuth();
   const [name, setName]       = useState('');
   const [business, setBiz]    = useState('');
   const [phone, setPhone]     = useState('');
+  const [email, setEmail]     = useState('');
   const [budget, setBudget]   = useState('');
   const [message, setMessage] = useState('');
   const [sent, setSent]       = useState(false);
 
+  const emailValid = /\S+@\S+\.\S+/.test(email);
+  const canSubmit  = !!(name && business && phone && emailValid);
+
   function submit() {
-    if (!name || !business || !phone) return;
+    if (!canSubmit) return;
     const enquiryId = genComplianceId('AD');
     const subject = encodeURIComponent(`Advertise Inquiry [${enquiryId}] — ${business}`);
     const body = encodeURIComponent(
@@ -21,6 +27,7 @@ Reference ID: ${enquiryId}
 Contact Name:  ${name}
 Business:      ${business}
 Phone:         ${phone}
+Email:         ${email}
 Budget Range:  ${budget || 'Not specified'}
 
 Message:
@@ -28,15 +35,32 @@ ${message || 'Interested in advertising on LocalAI.'}
 
 Submitted: ${new Date().toLocaleString('en-IN')}
 `);
-    // Best-effort backend submit
+    // ── Save the lead in the Contact Us table (POST /contacts) ──
+    // Field mapping: name→name, email→email; business, phone, budget and the
+    // user's message are combined into a clean labelled `message`. Bearer token
+    // attached only when the user is signed in (form is open to guests too).
+    const contactsMessage =
+`Advertise With Us — Enquiry
+
+Business / Company: ${business}
+Phone: ${phone}
+Monthly Budget: ${budget || 'Not specified'}
+
+Message:
+${message || 'Interested in advertising on LocalAI.'}`;
     try {
-      apiCall('/advertising-enquiries', { method:'POST', body: JSON.stringify({
-        enquiry_id: enquiryId, full_name: name, mobile: phone, business_name: business,
-        approximate_budget: budget, message,
-        consent_confirmed: true, consent_to_contact: true,
-        status: 'New', created_at: new Date().toISOString(),
-      }) }).catch(()=>{});
+      apiCall('/contacts', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: JSON.stringify({
+          name,
+          email,
+          subject: `Advertise With Us — ${business}`,
+          message: contactsMessage,
+        }),
+      }).catch(()=>{});
     } catch (e) { /* ignore */ }
+
     window.open(`mailto:ads@localaitv.com?subject=${subject}&body=${body}`);
     setSent(true);
   }
@@ -114,6 +138,14 @@ Submitted: ${new Date().toLocaleString('en-IN')}
           </div>
 
           <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,color:T.textMuted,marginBottom:6,fontWeight:600,letterSpacing:0.5}}>Email</div>
+            <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" type="email" style={{width:'100%',background:T.bg3,border:`1px solid ${email && !emailValid ? T.red : T.border}`,borderRadius:10,padding:'12px',color:T.text,fontSize:13,fontFamily:'inherit',boxShadow:T.isDark?'none':`0 2px 8px ${T.shadow}`}} />
+            {email && !emailValid && (
+              <div style={{fontSize:10,color:T.red,marginTop:4}}>Please enter a valid email address</div>
+            )}
+          </div>
+
+          <div style={{marginBottom:14}}>
             <div style={{fontSize:11,color:T.textMuted,marginBottom:6,fontWeight:600,letterSpacing:0.5}}>Monthly Budget Range</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
               {['< ₹10K','₹10K – ₹50K','₹50K – ₹2L','₹2L+'].map((b,bi) => (
@@ -132,13 +164,13 @@ Submitted: ${new Date().toLocaleString('en-IN')}
             <textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="Tell us about your business and goals..." rows={4} style={{width:'100%',background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 12px',color:T.text,fontSize:13,resize:'vertical',fontFamily:'inherit',boxShadow:T.isDark?'none':`0 2px 8px ${T.shadow}`}} />
           </div>
 
-          <button onClick={submit} disabled={!name||!business||!phone} style={{
+          <button onClick={submit} disabled={!canSubmit} style={{
             width:'100%',
-            background: (name&&business&&phone) ? `linear-gradient(135deg,${T.red},#7A0010)` : T.gray3,
+            background: canSubmit ? `linear-gradient(135deg,${T.red},#7A0010)` : T.gray3,
             color:T.text,border:'none',borderRadius:14,padding:'14px',
             fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,letterSpacing:1.5,
-            cursor: (name&&business&&phone) ? 'pointer' : 'not-allowed',
-            boxShadow: (name&&business&&phone) ? `0 8px 24px ${T.red}55` : 'none',
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
+            boxShadow: canSubmit ? `0 8px 24px ${T.red}55` : 'none',
           }}>📩 SEND INQUIRY</button>
 
           <div style={{textAlign:'center',padding:'14px 0 4px',fontSize:10,color:T.textMuted,lineHeight:1.5}}>
