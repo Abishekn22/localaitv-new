@@ -90,13 +90,6 @@ function ProfileScreen({ onNavigate }) {
     return '';
   }, [user]);
 
-  const isAdmin = useMemo(() => {
-    if (!user) return false;
-    if (user.is_admin || user.is_staff || user.is_superuser) return true;
-    const role = String(user.role || '').toLowerCase().replace(/[\s-]/g, '_');
-    return ['admin', 'master', 'super', 'superadmin', 'super_admin', 'moderator'].includes(role);
-  }, [user]);
-
   const memberSince = useMemo(() => {
     const raw = user?.createdAt || user?.created_at;
     if (!raw) return '';
@@ -260,18 +253,16 @@ function ProfileScreen({ onNavigate }) {
           </div>
         ))}
 
-        {/* Admin Dashboard — only for admin-tier users */}
-        {isAdmin && (
-          <button onClick={()=>onNavigate('admindashboard')} style={{
-            width:'100%', marginTop:8,
-            background:'linear-gradient(135deg,#1A237E,#0D47A1)',
-            color:'#FFFFFF', border:'none', borderRadius:12, padding:'14px',
-            fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:15,
-            cursor:'pointer', boxShadow:'0 4px 14px rgba(13,71,161,0.35)',
-          }}>
-            🛡️ Admin Dashboard
-          </button>
-        )}
+        {/* Admin Dashboard */}
+        <button onClick={()=>onNavigate('admindashboard')} style={{
+          width:'100%', marginTop:8,
+          background:'linear-gradient(135deg,#1A237E,#0D47A1)',
+          color:'#FFFFFF', border:'none', borderRadius:12, padding:'14px',
+          fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:15,
+          cursor:'pointer', boxShadow:'0 4px 14px rgba(13,71,161,0.35)',
+        }}>
+          🛡️ Admin Dashboard
+        </button>
 
 
         {/* Sign out */}
