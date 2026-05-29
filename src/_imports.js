@@ -13,7 +13,7 @@ export {
 
 export { ThemeContext, useAppTheme, ThemeProvider } from './theme/ThemeProvider.jsx';
 
-export { API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API } from './api/client.js';
+export { API_BASE, API_BASE_2, YT_CHANNEL, APP_VERSION, apiCall, apiCall2, API, API2 } from './api/client.js';
 
 export { useAPI } from './hooks/useAPI.js';
 export { useReveal, Reveal } from './hooks/useReveal.jsx';
