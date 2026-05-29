@@ -22,7 +22,16 @@ function resolveProfilePictureUrl(raw) {
 
 function ProfileScreen({ onNavigate }) {
   const { T } = useAppTheme();
-  const { user, token, refreshUser, logout } = useAuth();
+  const { user, token, refreshUser, logout, patchUser, isVerified } = useAuth();
+
+  // Admin Dashboard is shown only to admin-tier users (admin / master_admin /
+  // superadmin). Regular 'user' role never sees it.
+  const isAdmin = (() => {
+    if (!user) return false;
+    if (user.is_admin || user.is_staff || user.is_superuser) return true;
+    const role = String(user.role || '').toLowerCase().replace(/[\s-]/g, '_');
+    return ['admin', 'master', 'master_admin', 'super', 'superadmin', 'super_admin', 'moderator'].includes(role);
+  })();
 
   const [bootstrapping, setBootstrapping] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -42,6 +51,42 @@ function ProfileScreen({ onNavigate }) {
     refreshUser().finally(() => setBootstrapping(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // While on the Profile page ONLY, poll POST /users/:id/role every 4s to refresh
+  // the user's role + verification status. Guards against overlapping requests
+  // (skips if one is still in flight) so it can't pile up / crash the backend,
+  // and the interval is torn down on unmount — so it never runs elsewhere.
+  const userId = user?.id;
+  useEffect(() => {
+    if (!userId || !token) return;
+    let stopped = false;
+    let inFlight = false;
+    const check = async () => {
+      if (inFlight) return;                    // never overlap calls
+      inFlight = true;
+      try {
+        const res = await fetch(`${API_BASE}/users/${userId}/role`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` },
+          credentials: 'include',
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!stopped && data) {
+          patchUser({
+            ...(data.role ? { role: data.role } : {}),
+            ...('is_verified' in data ? { is_verified: data.is_verified } : {}),
+            ...('verified' in data ? { verified: data.verified } : {}),
+          });
+        }
+      } catch (e) { /* ignore transient errors */ }
+      finally { inFlight = false; }
+    };
+    check();                                   // run immediately on entering profile
+    const iv = setInterval(check, 4000);       // then every 4 seconds
+    return () => { stopped = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, token]);
 
   // Countdown effect for step 3
   useEffect(() => {
@@ -234,6 +279,32 @@ function ProfileScreen({ onNavigate }) {
 
       {/* Field list */}
       <div style={{flex:1,overflowY:'auto',padding:'18px 18px 120px'}}>
+        {/* Verification status — live from the API poll */}
+        <div style={{
+          display:'flex', alignItems:'center', gap:10,
+          background: isVerified ? 'rgba(0,200,90,0.10)' : 'rgba(245,158,11,0.10)',
+          border:`1px solid ${isVerified ? 'rgba(0,200,90,0.4)' : 'rgba(245,158,11,0.45)'}`,
+          borderRadius:12, padding:'12px 14px', marginBottom:12,
+        }}>
+          <div style={{
+            width:30, height:30, borderRadius:'50%', flexShrink:0,
+            background: isVerified ? '#00C85A' : '#F59E0B',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            color:'#fff', fontSize:16, fontWeight:900,
+          }}>{isVerified ? '✓' : '⏳'}</div>
+          <div style={{flex:1, minWidth:0}}>
+            <div style={{fontFamily:"'Barlow',sans-serif", fontWeight:800, fontSize:14,
+              color: isVerified ? '#00B050' : '#B45309'}}>
+              {isVerified ? 'Verified account' : 'Not verified'}
+            </div>
+            <div style={{fontSize:11.5, color:T.textMuted, marginTop:1, lineHeight:1.4}}>
+              {isVerified
+                ? 'You can upload news and use all features.'
+                : 'Your account is pending verification. Uploads unlock once an admin approves you.'}
+            </div>
+          </div>
+        </div>
+
         {fields.map((f,i) => (
           <div key={i} style={{
             background: T.bg2, border:`1px solid ${T.border}`,
@@ -253,16 +324,18 @@ function ProfileScreen({ onNavigate }) {
           </div>
         ))}
 
-        {/* Admin Dashboard */}
-        <button onClick={()=>onNavigate('admindashboard')} style={{
-          width:'100%', marginTop:8,
-          background:'linear-gradient(135deg,#1A237E,#0D47A1)',
-          color:'#FFFFFF', border:'none', borderRadius:12, padding:'14px',
-          fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:15,
-          cursor:'pointer', boxShadow:'0 4px 14px rgba(13,71,161,0.35)',
-        }}>
-          🛡️ Admin Dashboard
-        </button>
+        {/* Admin Dashboard — admin-tier users only */}
+        {isAdmin && (
+          <button onClick={()=>onNavigate('admindashboard')} style={{
+            width:'100%', marginTop:8,
+            background:'linear-gradient(135deg,#1A237E,#0D47A1)',
+            color:'#FFFFFF', border:'none', borderRadius:12, padding:'14px',
+            fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:15,
+            cursor:'pointer', boxShadow:'0 4px 14px rgba(13,71,161,0.35)',
+          }}>
+            🛡️ Admin Dashboard
+          </button>
+        )}
 
 
         {/* Sign out */}

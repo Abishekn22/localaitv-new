@@ -82,6 +82,7 @@ import PermissionSheet from './components/sheets/PermissionSheet.jsx';
 import Toast           from './components/Toast.jsx';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
+import { NotificationProvider } from './contexts/NotificationContext.jsx';
 
 // Lazy wrapper for the 'shortsfeed' route. Mounting this fires the
 // /api/incidents fetch; the fetch never runs when the user isn't on
@@ -108,7 +109,14 @@ function App() {
   const { isDark: appIsDark } = useAppTheme();
   // Auth gate — logged-in users go straight to the upload page; guests are
   // routed to the registration / login screen first.
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isVerified, checkVerificationOnce } = useAuth();
+
+  // Upload + every upload sub-form require a VERIFIED account.
+  const VERIFIED_ONLY_SCREENS = [
+    'upload', 'newsupload', 'birthdayform', 'anniversaryform', 'whoiswhoform',
+    'talentshowform', 'publicvoiceform', 'eventsform', 'upcomingmarriage',
+    'shopping', 'jobs', 'carsales', 'rentalform', 'vegpriceform', 'guestintake',
+  ];
 
   // ── Onboarding persistence ──────────────────────────────────
   // First launch: no localaitv_device_id → mint a UUID, store it, and
@@ -119,7 +127,7 @@ function App() {
   // e.g. user closed the app mid-onboarding) falls back to the full flow.
   const __init = (() => {
     if (typeof window === 'undefined' || !window.localStorage) {
-      return { isReturning:false, constituency:null, state:null };
+      return { isReturning:false, constituency:null, state:null, lastScreen:null, lastNav:null };
     }
     try {
       let id = window.localStorage.getItem('localaitv_device_id');
@@ -134,16 +142,25 @@ function App() {
         isReturning,
         constituency: window.localStorage.getItem('localaitv_constituency'),
         state:        window.localStorage.getItem('localaitv_state'),
+        lastScreen:   window.localStorage.getItem('localaitv_screen'),
+        lastNav:      window.localStorage.getItem('localaitv_nav'),
       };
     } catch (e) {
-      return { isReturning:false, constituency:null, state:null };
+      return { isReturning:false, constituency:null, state:null, lastScreen:null, lastNav:null };
     }
   })();
 
-  const [screen, setScreen]             = useState(
-    __init.isReturning && __init.constituency ? 'home' : 'splash'
-  );
-  const [navActive, setNavActive]       = useState('home');
+  // Screens that belong to the onboarding flow — never restored on reload.
+  const ONBOARDING_SCREENS = ['splash', 'intro', 'location'];
+
+  // On reload, restore the page the user was on (returning users only); fall
+  // back to home. First-time / mid-onboarding users still get the full flow.
+  const [screen, setScreen]             = useState(() => {
+    if (!(__init.isReturning && __init.constituency)) return 'splash';
+    const last = __init.lastScreen;
+    return (last && !ONBOARDING_SCREENS.includes(last)) ? last : 'home';
+  });
+  const [navActive, setNavActive]       = useState(__init.lastNav || 'home');
   const [selectedNews, setSelectedNews] = useState(null);
   const [selectedChannel, setSelectedChannel] = useState(null);
   // When the bulletin player is opened from a channel's detail page, remember
@@ -217,6 +234,18 @@ function App() {
     }
   }, []);
 
+  // Remember the current page so a reload restores it (not home). Onboarding
+  // screens are excluded so the splash/intro/location flow isn't re-pinned.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      if (!ONBOARDING_SCREENS.includes(screen)) {
+        window.localStorage.setItem('localaitv_screen', screen);
+        window.localStorage.setItem('localaitv_nav', navActive);
+      }
+    } catch (e) {}
+  }, [screen, navActive]);
+
   // Offline detection
   useEffect(() => {
     function handleOffline() { setIsOffline(true); }
@@ -237,7 +266,7 @@ function App() {
     logoTapTimer.current = setTimeout(() => setLogoTaps(0), 2000);
   }
 
-  function navigate(to) {
+  async function navigate(to) {
     // Any explicit navigation cancels a pending "return to channel" hand-off.
     setBulletinReturnChannel(null);
     // Upload requires a signed-in user. Guests tapping Upload (bottom nav or
@@ -249,6 +278,21 @@ function App() {
       setSelectedChannel(null);
       setScreen('uploadregister');
       return;
+    }
+    // Signed in + heading to an upload screen → run a SINGLE fresh verification
+    // check (one request per entry, not a poll). Fall back to the cached flag
+    // if the request fails. If not verified, send the user to their Profile.
+    if (isAuthenticated && VERIFIED_ONLY_SCREENS.includes(to)) {
+      const fresh = await checkVerificationOnce();
+      const verifiedNow = fresh == null ? isVerified : fresh;
+      if (!verifiedNow) {
+        showToast('Your account is pending verification — uploads unlock once verified.');
+        setNavActive('profile');
+        setSelectedNews(null);
+        setSelectedChannel(null);
+        setScreen('profile');
+        return;
+      }
     }
     setNavActive(to);
     setSelectedNews(null);
@@ -535,7 +579,9 @@ function AppRoot() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <App />
+        <NotificationProvider>
+          <App />
+        </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );

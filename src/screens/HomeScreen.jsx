@@ -18,12 +18,15 @@ import UploadCtaBanner from './../components/Sections/UploadCtaBanner.jsx';
 import { LocationPin, LiveDot, FooterLink } from './../components/atoms.jsx';
 import { ShortNewsSection } from './../components/Sections/ShortNewsSection.jsx';
 import { useAuth } from './../contexts/AuthContext.jsx';
+import { useNotifications, formatNotifTime } from './../contexts/NotificationContext.jsx';
 
 function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstituency, userState, onChangeLocation, onSelectLocation }) {
   const { T, isDark, toggleTheme } = useAppTheme();
   // Signed-in user drives the hamburger header. When logged out, show a
   // generic "Guest" prompt instead of stale data.
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, isVerified, logout } = useAuth();
+  // Internal, app-driven notifications (verification status + future events).
+  const { notifications, unreadCount, markAllRead, clearAll } = useNotifications();
   const displayName   = isAuthenticated ? (user?.name || 'User') : 'Guest';
   const avatarInitial = (displayName.trim().charAt(0) || 'G').toUpperCase();
   // Resolve the signed-in user's profile photo (same rules as the Profile page).
@@ -55,7 +58,6 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     return false;
   });
   const [showLiveOverlay, setShowLiveOverlay] = useState(false); // bulletin click → fullscreen YouTube live
-  const [notifRead,     setNotifRead]     = useState(false);
   const [showSearch,    setShowSearch]    = useState(false);
   const [showAppShare,  setShowAppShare]  = useState(false); // share-the-app sheet (triggered by the new Share App button)
   const [searchQuery,   setSearchQuery]   = useState('');
@@ -83,15 +85,6 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   const pullStartY    = useRef(0);
   const [dropStep,      setDropStep]      = useState('state');  // 'state' | 'constituency'
   const [dropState,     setDropState]     = useState(null);     // 'AP' | 'TG'
-
-  const NOTIFS = [
-    { id:1, icon:'🔴', title:'LIVE: Kurnool TV is now LIVE',        sub:'Started 4 minutes ago',              time:'4m',  unread:true  },
-    { id:2, icon:'📰', title:'Breaking: కర్నూల్‌లో కొత్త పథకం',      sub:'District Collector announcement',    time:'18m', unread:true  },
-    { id:3, icon:'🎂', title:'Birthday wishes: 12 new wishes today', sub:'From your constituency channel',     time:'1h',  unread:false },
-    { id:4, icon:'🌾', title:'Veg prices updated for your area',     sub:'Tomato ↑ ₹12/kg today',             time:'2h',  unread:false },
-    { id:5, icon:'⚡', title:'Breaking: రాష్ట్రంలో కొత్త నిర్ణయం',   sub:'State government latest update',    time:'3h',  unread:false },
-    { id:6, icon:'📺', title:'Schedule reminder: 6PM bulletin',      sub:'Evening prime bulletin in 15 min',  time:'15m', unread:false },
-  ];
 
   const displayConstituency = userConstituency || 'Kurnool';
   const displayState        = userState        || 'AP';
@@ -403,7 +396,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
 
             {/* Bell icon — 10% smaller (38 → 34) */}
             <button
-              onClick={()=>{setShowNotifs(v=>!v); setNotifRead(true);}}
+              onClick={()=>setShowNotifs(v=>!v)}
               style={{
                 width:34, height:34, borderRadius:10, cursor:'pointer',
                 background: showNotifs ? 'rgba(208,2,27,0.12)' : T.bg3,
@@ -417,13 +410,15 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
               </svg>
-              {!notifRead && (
+              {unreadCount > 0 && (
                 <span style={{
-                  position:'absolute', top:6, right:6,
-                  width:6, height:6, borderRadius:'50%',
+                  position:'absolute', top:-3, right:-3,
+                  minWidth:15, height:15, padding:'0 3px', borderRadius:8,
                   background:T.red, border:`1.5px solid ${T.bg2}`,
+                  color:'#fff', fontSize:9, fontWeight:800, lineHeight:'12px',
+                  display:'flex', alignItems:'center', justifyContent:'center',
                   pointerEvents:'none',
-                }}/>
+                }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
               )}
             </button>
 
@@ -511,27 +506,40 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.text}}>
               🔔 Notifications
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:10}}>
-              <span style={{fontSize:10,color:T.textMuted,cursor:'pointer',fontWeight:600}}>Mark all read</span>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <span
+                onClick={()=>{ if(unreadCount>0) markAllRead(); }}
+                style={{fontSize:10,fontWeight:600,
+                  color:unreadCount>0?T.textMuted:`${T.textMuted}66`,
+                  cursor:unreadCount>0?'pointer':'default'}}>Mark all read</span>
+              <span
+                onClick={()=>{ if(notifications.length) clearAll(); }}
+                style={{fontSize:10,fontWeight:600,
+                  color:notifications.length?T.red:`${T.red}66`,
+                  cursor:notifications.length?'pointer':'default'}}>Clear all</span>
               <button onClick={()=>setShowNotifs(false)} style={{background:'none',border:'none',fontSize:18,color:T.textMuted,cursor:'pointer',lineHeight:1}}>×</button>
             </div>
           </div>
           {/* Notif list */}
-          {NOTIFS.map(n=>(
+          <div style={{maxHeight:'60vh',overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+          {notifications.length === 0 ? (
+            <div style={{padding:'28px 16px',textAlign:'center'}}>
+              <div style={{fontSize:26,marginBottom:6}}>🔕</div>
+              <div style={{fontSize:12,fontWeight:600,color:T.text}}>No notifications yet</div>
+              <div style={{fontSize:10.5,color:T.textMuted,marginTop:3}}>We'll let you know when your account status changes.</div>
+            </div>
+          ) : notifications.map(n=>(
             <div key={n.id} onClick={()=>{
               setShowNotifs(false);
-              if(n.id===1) onNavigate('channels');           // LIVE → channels
-              else if(n.id===2) onOpenNews && onOpenNews(null); // Breaking → news
-              else if(n.id===3) onNavigate('upload');         // Birthday → upload
-              else if(n.id===4) onNavigate('utility');        // Veg prices → utility
+              if (n.nav) onNavigate(n.nav);
             }} style={{
               display:'flex',alignItems:'center',gap:12,padding:'12px 16px',
-              borderBottom:`1px solid ${T.border}`,cursor:'pointer',
-              background:n.unread&&!notifRead?`${T.red}08`:'transparent',
+              borderBottom:`1px solid ${T.border}`,cursor:n.nav?'pointer':'default',
+              background:n.unread?`${T.red}08`:'transparent',
               transition:'background 0.15s',
             }}>
               <div style={{width:38,height:38,borderRadius:10,flexShrink:0,
-                background:n.unread&&!notifRead?`${T.red}15`:T.bg3,
+                background:n.unread?`${T.red}15`:T.bg3,
                 display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>
                 {n.icon}
               </div>
@@ -541,14 +549,11 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                 <div style={{fontSize:10,color:T.textMuted,marginTop:2}}>{n.sub}</div>
               </div>
               <div style={{flexShrink:0,fontSize:9,color:T.textMuted,minWidth:24,textAlign:'right'}}>
-                {n.time}
-                {n.unread&&!notifRead&&<div style={{width:6,height:6,borderRadius:'50%',background:T.red,marginTop:3,marginLeft:'auto'}}/>}
+                {formatNotifTime(n.ts)}
+                {n.unread&&<div style={{width:6,height:6,borderRadius:'50%',background:T.red,marginTop:3,marginLeft:'auto'}}/>}
               </div>
             </div>
           ))}
-          {/* Footer */}
-          <div style={{padding:'10px 16px',textAlign:'center'}}>
-            <span onClick={()=>setShowNotifs(false)} style={{fontSize:11,color:T.red,fontWeight:600,cursor:'pointer'}}>View all notifications →</span>
           </div>
         </div>
       )}
@@ -599,6 +604,20 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                   fontWeight:700, fontSize:18, color:'#FFFFFF',
                   overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
                 }}>{displayName}</div>
+                {isAuthenticated && (
+                  <div style={{
+                    marginTop:5, display:'inline-flex', alignItems:'center', gap:5,
+                    padding:'2px 9px 2px 7px', borderRadius:999,
+                    background: isVerified ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.18)',
+                    border: isVerified ? 'none' : '1px solid rgba(255,255,255,0.45)',
+                  }}>
+                    <span style={{fontSize:11, lineHeight:1}}>{isVerified ? '✅' : '⏳'}</span>
+                    <span style={{
+                      fontFamily:"'Barlow',sans-serif", fontWeight:700, fontSize:11,
+                      color: isVerified ? '#0F9D58' : '#FFFFFF',
+                    }}>{isVerified ? 'Verified' : 'Not verified'}</span>
+                  </div>
+                )}
                 {!isAuthenticated && (
                   <button
                     onClick={()=>{ setShowHamburger(false); onNavigate('profile'); }}
@@ -1292,9 +1311,12 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         <LiveStrip activeChannel={activeChannel} allChannels={LIVE_CHANNELS} onNavigate={onNavigate} />
 
         {/* ══ ROTATING UPLOAD CTA — two messages swap every 3.5s ══ */}
-        <Reveal>
-          <UploadCtaBanner onNavigate={onNavigate} />
-        </Reveal>
+        {/* Hidden once the user is signed in (no need to prompt them to register). */}
+        {!isAuthenticated && (
+          <Reveal>
+            <UploadCtaBanner onNavigate={onNavigate} />
+          </Reveal>
+        )}
 
         {/* ── CLASSIFIEDS (Kurnool Local) — moved to top per request ─ */}
         <Reveal delay={0.05}>
