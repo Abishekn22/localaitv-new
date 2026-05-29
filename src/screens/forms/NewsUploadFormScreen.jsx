@@ -343,17 +343,21 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
       }
       setUploadPct(92);
 
-      // 2) POST /api/reports — JSON body with the path arrays (matches the
-      //    documented report request shape).
+      // 2) POST /api/reports — exact documented body shape.
+      const profilePicPath =
+        user?.profile_picture || user?.profile_photo || user?.profilePhoto ||
+        user?.profile_pic || user?.profile_image || user?.profileImage ||
+        user?.photo || user?.avatar || user?.image || '';
       const payload = {
         name: (user?.name || '').trim(),
         email: user?.email || '',
-        headlines: headline.trim(),
+        subject: headline.trim(),
         message: details.trim(),
         location: (location || '').trim(),
         video_paths,
         image_paths,
         audio_paths,
+        profile_picture: profilePicPath,
       };
 
       const res = await fetch(`${API_BASE}/reports`, {
