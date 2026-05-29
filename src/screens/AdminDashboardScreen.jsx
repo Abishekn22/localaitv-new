@@ -104,6 +104,7 @@ function AdminDashboardScreen({ onBack }) {
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersErr, setUsersErr] = useState('');
   const [userSearch, setUserSearch] = useState('');
+  const [userVerFilter, setUserVerFilter] = useState('all'); // all | unverified | verified
   const [promoteRole, setPromoteRole] = useState(null); // null | 'admin' | 'master_admin' — drives "pick a user to promote" mode
   const loadUsers = useCallback(async () => {
     setUsersLoading(true); setUsersErr('');
@@ -1721,7 +1722,10 @@ function AdminDashboardScreen({ onBack }) {
       const roleMeta = (r) => ROLE_META[String(r || 'user').toLowerCase()] || ROLE_META.user;
       const isVerified = (u) => u.is_verified === 1 || u.is_verified === true || u.is_verified === '1';
       const q = userSearch.trim().toLowerCase();
+      const unverifiedTotal = users.filter(u => !isVerified(u)).length;
       const filteredUsers = users.filter(u => {
+        if (userVerFilter === 'verified' && !isVerified(u)) return false;
+        if (userVerFilter === 'unverified' && isVerified(u)) return false;
         if (!q) return true;
         return [u.name, u.phone, u.email, u.role, locName(u.location)]
           .some(f => f != null && f.toString().toLowerCase().includes(q));
@@ -1752,6 +1756,18 @@ function AdminDashboardScreen({ onBack }) {
                 background:'none',border:'none',color:T.textMuted,fontSize:14,cursor:'pointer',lineHeight:1,padding:2}}>✕</button>
             )}
           </div>
+          <div style={{display:'flex',gap:6,marginBottom:10,alignItems:'center'}}>
+            {[['all','All'],['unverified','Unverified'],['verified','Verified']].map(([key,label])=>{
+              const active = userVerFilter===key;
+              const badge = key==='unverified' && unverifiedTotal ? ` · ${unverifiedTotal}` : '';
+              return (
+                <button key={key} onClick={()=>setUserVerFilter(key)} style={{flexShrink:0,fontSize:11,fontWeight:700,cursor:'pointer',
+                  color:active?'#fff':T.textMuted,background:active?'#3B82F6':T.bg3,
+                  border:`1px solid ${T.border}`,borderRadius:20,padding:'6px 12px'}}>{label}{badge}</button>
+              );
+            })}
+            <span style={{marginLeft:'auto',fontSize:11,color:T.textMuted,fontWeight:700}}>{sortedUsers.length} of {users.length}</span>
+          </div>
           {promoteRole && (
             <div style={{...cardS,background:`${roleMeta(promoteRole).c}14`,borderColor:`${roleMeta(promoteRole).c}66`,display:'flex',alignItems:'center',gap:10}}>
               <div style={{flex:1,minWidth:0}}>
@@ -1767,7 +1783,9 @@ function AdminDashboardScreen({ onBack }) {
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No users found.</div>
           )}
           {!usersLoading && !usersErr && users.length > 0 && sortedUsers.length === 0 && (
-            <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No users match “{userSearch}”.</div>
+            <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>
+              {userSearch ? `No users match “${userSearch}”.` : `No ${userVerFilter !== 'all' ? userVerFilter + ' ' : ''}users.`}
+            </div>
           )}
           <div style={{maxHeight:520,overflowY:'auto',marginRight:-4,paddingRight:4}}>
           {sortedUsers.map((u,i) => {
