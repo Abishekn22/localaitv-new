@@ -86,7 +86,16 @@ export function AuthProvider({ children }) {
       const data = await res.json().catch(() => null);
       // Backend may return either { user: {...} } or the user object directly
       const fresh = data && (data.user || (data.id ? data : null));
-      if (fresh) setUser(fresh);
+      if (fresh) {
+        // Preserve the profile photo if /auth/me doesn't echo it back, so the
+        // avatar doesn't vanish after a refresh.
+        const prev = readJSON(STORAGE_KEY_USER) || {};
+        if (!fresh.profile_picture && !fresh.profile_photo) {
+          const keptPic = prev.profile_picture || prev.profile_photo;
+          if (keptPic) fresh.profile_picture = keptPic;
+        }
+        setUser(fresh);
+      }
       return fresh;
     } catch {
       return null;

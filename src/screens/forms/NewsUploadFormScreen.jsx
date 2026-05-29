@@ -12,6 +12,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
   // Recorded audio clips: { file, url } | null.
   const [headlineAudio, setHeadlineAudio] = useState(null);
   const [descriptionAudio, setDescriptionAudio] = useState(null);
+  const [locationAudio, setLocationAudio] = useState(null);
   // Full-screen preview of an added media file (index into mediaFiles) | null.
   const [previewIdx, setPreviewIdx] = useState(null);
   // Add a captured/picked file to the media list (cap at 3).
@@ -32,7 +33,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
 
   const storeFieldAudio = (field, file) => {
     const clip = { file, url: URL.createObjectURL(file) };
-    const setter = field === 'headline' ? setHeadlineAudio : setDescriptionAudio;
+    const setter = field === 'headline' ? setHeadlineAudio : field === 'details' ? setDescriptionAudio : setLocationAudio;
     setter(prev => { if (prev?.url) { try { URL.revokeObjectURL(prev.url); } catch (e) {} } return clip; });
   };
 
@@ -325,6 +326,7 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
         ...mediaFiles.map(f => ({ file: f, kind: mediaKindOf(f) })),
         ...(headlineAudio ? [{ file: headlineAudio.file, kind: 'audio' }] : []),
         ...(descriptionAudio ? [{ file: descriptionAudio.file, kind: 'audio' }] : []),
+        ...(locationAudio ? [{ file: locationAudio.file, kind: 'audio' }] : []),
       ];
       const totalBytes = uploadJobs.reduce((a, j) => a + j.file.size, 0) || 1;
       let doneBytes = 0;
@@ -343,17 +345,21 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
       }
       setUploadPct(92);
 
-      // 2) POST /api/reports — JSON body with the path arrays (matches the
-      //    documented report request shape).
+      // 2) POST /api/reports — exact documented body shape.
+      const profilePicPath =
+        user?.profile_picture || user?.profile_photo || user?.profilePhoto ||
+        user?.profile_pic || user?.profile_image || user?.profileImage ||
+        user?.photo || user?.avatar || user?.image || '';
       const payload = {
         name: (user?.name || '').trim(),
         email: user?.email || '',
-        headlines: headline.trim(),
+        subject: headline.trim(),
         message: details.trim(),
         location: (location || '').trim(),
         video_paths,
         image_paths,
         audio_paths,
+        profile_picture: profilePicPath,
       };
 
       const res = await fetch(`${API_BASE}/reports`, {
@@ -984,41 +990,44 @@ function NewsUploadFormScreen({ onBack, onNavigate, constituency }) {
           {/* Bottom row: small Record button only (right-aligned) */}
           <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',
             marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`}}>
-            {VOICE_SUPPORTED && (
-              <button onClick={() => voiceField==='location'?stopVoice():startVoice('location')}
-                onMouseEnter={e=>{
-                  e.currentTarget.style.transform='translateY(-2px) scale(1.06)';
-                  e.currentTarget.style.boxShadow='0 6px 18px rgba(208,2,27,0.6)';
-                  e.currentTarget.style.background='linear-gradient(135deg,#FF1A35,#C8001F)';
-                }}
-                onMouseLeave={e=>{
-                  e.currentTarget.style.transform='translateY(0) scale(1)';
-                  e.currentTarget.style.boxShadow='0 2px 10px rgba(208,2,27,0.35)';
-                  e.currentTarget.style.background = voiceField==='location'
-                    ?'linear-gradient(135deg,#9A0015,#D0021B)'
-                    :'linear-gradient(135deg,#E8001E,#B0001A)';
-                }}
-                style={{
-                  background: voiceField==='location'
-                    ?'linear-gradient(135deg,#9A0015,#D0021B)'
-                    :'linear-gradient(135deg,#E8001E,#B0001A)',
-                  border:'none', borderRadius:24, padding:'8px 18px',
-                  color:'white', fontSize:12, fontWeight:800, letterSpacing:0.5,
-                  cursor:'pointer',
-                  display:'flex', alignItems:'center', gap:7,
-                  boxShadow:'0 2px 10px rgba(208,2,27,0.35)',
-                  transition:'all 0.22s cubic-bezier(0.22,1,0.36,1)',
-                }}>
-                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="2" width="6" height="11" rx="3"/>
-                  <path d="M5 10a7 7 0 0014 0"/>
-                  <line x1="12" y1="19" x2="12" y2="22"/>
-                  <line x1="8" y1="22" x2="16" y2="22"/>
-                </svg>
-                <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>{voiceField==='location'?'ఆపండి / Stop':'రికార్డ్ / Record'}</span>
-              </button>
-            )}
+            <button onClick={()=>toggleFieldAudio('location')}
+              style={{
+                background: audioRecording==='location'
+                  ?'linear-gradient(135deg,#9A0015,#D0021B)'
+                  :'linear-gradient(135deg,#E8001E,#B0001A)',
+                border:'none', borderRadius:24, padding:'8px 18px',
+                color:'white', fontSize:12, fontWeight:800, letterSpacing:0.5,
+                cursor:'pointer', display:'flex', alignItems:'center', gap:7,
+                boxShadow:'0 2px 10px rgba(208,2,27,0.35)',
+                animation: audioRecording==='location' ? 'pulse 1s infinite' : 'none',
+              }}>
+              {audioRecording==='location' ? (
+                <>
+                  <span style={{width:9,height:9,borderRadius:'50%',background:'#fff'}}/>
+                  <span style={{fontVariantNumeric:'tabular-nums',letterSpacing:1}}>{audioMMSS}</span>
+                  <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>ఆపండి / Stop</span>
+                </>
+              ) : (
+                <>
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3"/>
+                    <path d="M5 10a7 7 0 0014 0"/>
+                    <line x1="12" y1="19" x2="12" y2="22"/>
+                    <line x1="8" y1="22" x2="16" y2="22"/>
+                  </svg>
+                  <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif"}}>రికార్డ్ / Record</span>
+                </>
+              )}
+            </button>
           </div>
+          {/* Recorded location audio — playback preview */}
+          {locationAudio && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'8px 10px'}}>
+              <audio src={locationAudio.url} controls style={{flex:1,height:34}}/>
+              <button onClick={()=>{ try{URL.revokeObjectURL(locationAudio.url);}catch(e){} setLocationAudio(null); }}
+                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:'none',background:'rgba(208,2,27,0.92)',color:'white',fontSize:14,fontWeight:800,cursor:'pointer'}}>✕</button>
+            </div>
+          )}
         </div>
         {/* Content originality confirmation */}
         <div style={{
