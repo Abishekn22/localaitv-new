@@ -74,7 +74,7 @@ function UtilityScreen({ onBack, onNavigate, constituency, initialTab='veg' }) {
         )}
         {tab==='train'&&(
           <>
-            <div style={{fontSize:11,color:T.textMuted,marginBottom:12}}>Kurnool City Railway Station · Today</div>
+            <div style={{fontSize:11,color:T.textMuted,marginBottom:12}}>{constituency||'Kurnool'} Railway Station · Today</div>
             {trains.map((t,i)=>(
               <div key={i} style={{background:T.bg2,borderRadius:12,padding:'14px',marginBottom:10,border:`1px solid ${T.border}`}}>
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
@@ -90,8 +90,16 @@ function UtilityScreen({ onBack, onNavigate, constituency, initialTab='veg' }) {
                     <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',fontSize:12}}>🚂</div>
                   </div>
                   <div style={{textAlign:'center'}}>
-                    <div style={{fontSize:18,fontWeight:800,color:T.gold}}>{t.arr}</div>
-                    <div style={{fontSize:10,color:T.textMuted}}>{t.to}</div>
+                    {t.arr
+                      ? <div style={{fontSize:18,fontWeight:800,color:T.gold}}>{t.arr}</div>
+                      : <div style={{fontSize:14,fontWeight:800,color:T.gold}}>{t.to}</div>}
+                    <div style={{fontSize:10,color:T.textMuted}}>
+                      {t.arr
+                        ? t.to
+                        : (Array.isArray(t.days) && t.days.length
+                            ? (t.days.length >= 7 ? 'Daily' : t.days.join(', '))
+                            : (t.type || ''))}
+                    </div>
                   </div>
                 </div>
               </div>
