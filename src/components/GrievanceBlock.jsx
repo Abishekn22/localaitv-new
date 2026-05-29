@@ -1,23 +1,48 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 function GrievanceBlock() {
+  const { token } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [type,     setType]     = useState('');
   const [name,     setName]     = useState('');
+  const [email,    setEmail]    = useState('');
   const [phone,    setPhone]    = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [desc,     setDesc]     = useState('');
   const [sent,     setSent]     = useState(false);
 
   function send() {
-    if (!type || !name || !desc) return;
-    const subject = encodeURIComponent(`Grievance: ${type} — ${name}`);
+    if (!type || !name || !email || !desc) return;
+
+    // ── Grievance API submission (POST /contacts) ──
+    // Field mapping: name→name, email→email, "type — video link"→subject,
+    // phone + complaint details combined into a labelled message.
+    const subject = `${type} — ${videoUrl || 'No video link'}`;
+    const message =
+`Phone: ${phone || 'Not provided'}
+
+Complaint Details: ${desc}`;
+
+    // API_BASE already ends in /api → path is '/contacts'. Bearer token is
+    // attached only when the user is signed in (form is open to anon users).
+    try {
+      apiCall('/contacts', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: JSON.stringify({ name, email, subject, message }),
+      }).catch(()=>{});
+    } catch (e) { /* ignore */ }
+
+    // Keep the email draft as a belt-and-suspenders fallback.
+    const mailSubject = encodeURIComponent(`Grievance: ${type} — ${name}`);
     const body = encodeURIComponent(
 `GRIEVANCE / COMPLAINT — LocalAI TV
 
 Type:        ${type}
 Name:        ${name}
+Email:       ${email}
 Phone:       ${phone || 'Not provided'}
 Video URL:   ${videoUrl || 'Not provided'}
 
@@ -26,7 +51,7 @@ ${desc}
 
 Submitted: ${new Date().toLocaleString('en-IN')}
 `);
-    window.open(`mailto:support@localaitv.com?subject=${subject}&body=${body}`);
+    window.open(`mailto:support@localaitv.com?subject=${mailSubject}&body=${body}`);
     setSent(true);
   }
 
@@ -35,7 +60,7 @@ Submitted: ${new Date().toLocaleString('en-IN')}
       <div style={{fontSize:36,marginBottom:8}}>✅</div>
       <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.text,marginBottom:4}}>Grievance Submitted</div>
       <div style={{fontSize:12,color:T.textMuted,lineHeight:1.6}}>Your complaint has been sent to our team. We will review and respond within 24–48 hours.</div>
-      <button onClick={()=>{setSent(false);setExpanded(false);setType('');setName('');setPhone('');setVideoUrl('');setDesc('');}}
+      <button onClick={()=>{setSent(false);setExpanded(false);setType('');setName('');setEmail('');setPhone('');setVideoUrl('');setDesc('');}}
         style={{marginTop:14,background:T.bg3,border:'none',borderRadius:10,padding:'10px 20px',color:T.textMuted,fontSize:13,cursor:'pointer'}}>
         Close
       </button>
@@ -104,6 +129,13 @@ Submitted: ${new Date().toLocaleString('en-IN')}
               style={{width:'100%',background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'11px 14px',color:T.text,fontSize:13,boxSizing:'border-box',boxShadow:T.isDark?'none':`0 2px 8px ${T.shadow}`}}/>
           </div>
 
+          {/* Email */}
+          <div style={{marginBottom:10}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:10,letterSpacing:1.5,color:T.textMuted,textTransform:'uppercase',marginBottom:6}}>Email <span style={{color:T.red}}>*</span></div>
+            <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" type="email"
+              style={{width:'100%',background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'11px 14px',color:T.text,fontSize:13,boxSizing:'border-box',boxShadow:T.isDark?'none':`0 2px 8px ${T.shadow}`}}/>
+          </div>
+
           {/* Phone */}
           <div style={{marginBottom:10}}>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:10,letterSpacing:1.5,color:T.textMuted,textTransform:'uppercase',marginBottom:6}}>Phone (Optional)</div>
@@ -130,8 +162,8 @@ Submitted: ${new Date().toLocaleString('en-IN')}
             ⏱ We respond to all grievances within <strong>24–48 hours</strong>. Content flagged for removal will be reviewed within <strong>24 hours</strong>.
           </div>
 
-          <button onClick={send} disabled={!type||!name||!desc}
-            style={{width:'100%',background:type&&name&&desc?'linear-gradient(135deg,#D0021B,#7A0010)':'rgba(255,255,255,0.08)',color:T.text,border:'none',borderRadius:10,padding:'13px',fontWeight:800,fontSize:14,cursor:type&&name&&desc?'pointer':'not-allowed',letterSpacing:0.5}}>
+          <button onClick={send} disabled={!type||!name||!email||!desc}
+            style={{width:'100%',background:type&&name&&email&&desc?'linear-gradient(135deg,#D0021B,#7A0010)':'rgba(255,255,255,0.08)',color:T.text,border:'none',borderRadius:10,padding:'13px',fontWeight:800,fontSize:14,cursor:type&&name&&email&&desc?'pointer':'not-allowed',letterSpacing:0.5}}>
             📣 Submit Grievance
           </button>
         </div>
