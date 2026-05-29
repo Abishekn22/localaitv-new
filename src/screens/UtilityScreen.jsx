@@ -32,6 +32,66 @@ function UtilityScreen({ onBack, onNavigate, constituency, initialTab='veg' }) {
     TRAIN_FALLBACK, [constituency]
   );
 
+  // ── Live weather (same OpenWeatherMap API as the Home page) ───────────────
+  // Strip the constituency suffix (Urban/City/East/…) so OWM geocodes the city.
+  const OWM_KEY = 'cdbf68f3afc557e674b97c9f52536ab6';
+  const weatherCity = useMemo(
+    () => String(constituency || 'Kurnool').replace(/ (Urban|City|East|West|North|South)$/i, '').trim(),
+    [constituency]
+  );
+  const [weather, setWeather]               = useState(null);   // { temp, feelsLike, humidity, main, wind, sunrise, sunset }
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError]     = useState(false);
+
+  // Only fetch when the Weather tab is active (avoids a call on veg/train/bullion).
+  useEffect(() => {
+    if (tab !== 'weather' || !weatherCity) return;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    setWeatherLoading(true);
+    setWeatherError(false);
+    fetch(
+      `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(weatherCity + ',IN')}&appid=${OWM_KEY}&units=metric`,
+      { signal: ctrl.signal }
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled) return;
+        if (!d || !d.main) { setWeather(null); setWeatherError(true); return; }
+        setWeather({
+          temp:      Math.round(d.main.temp),
+          feelsLike: Math.round(d.main.feels_like),
+          humidity:  d.main.humidity,
+          main:      d.weather && d.weather[0] ? d.weather[0].main : '',
+          wind:      d.wind ? Math.round(d.wind.speed * 3.6) : null, // m/s → km/h
+          sunrise:   d.sys ? d.sys.sunrise : null,
+          sunset:    d.sys ? d.sys.sunset : null,
+        });
+      })
+      .catch(() => { if (!cancelled) setWeatherError(true); })
+      .finally(() => { if (!cancelled) setWeatherLoading(false); });
+    return () => { cancelled = true; ctrl.abort(); };
+  }, [tab, weatherCity]);
+
+  // OWM "main" → emoji (same mapping as the Home page).
+  const weatherEmoji = (main) => {
+    switch ((main || '').toLowerCase()) {
+      case 'clear':        return '☀️';
+      case 'clouds':       return '☁️';
+      case 'rain':         return '🌧️';
+      case 'drizzle':      return '🌦️';
+      case 'thunderstorm': return '⛈️';
+      case 'snow':         return '❄️';
+      case 'mist':
+      case 'smoke':
+      case 'haze':
+      case 'fog':          return '🌫️';
+      default:             return '🌤️';
+    }
+  };
+  const fmtTime = (unixSec) =>
+    unixSec ? new Date(unixSec * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—';
+
   const tabs = [
     {id:'veg',     label:'🥦 Vegetables'},
     {id:'train',   label:'🚂 Trains'},
@@ -131,26 +191,41 @@ function UtilityScreen({ onBack, onNavigate, constituency, initialTab='veg' }) {
         )}
         {tab==='weather'&&(
           <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            <div style={{background:`linear-gradient(135deg,#0d2a6e,#06153a)`,borderRadius:16,padding:'20px',border:`1px solid rgba(100,150,255,0.2)`,textAlign:'center'}}>
-              <div style={{fontSize:56}}>☀️</div>
-              <div style={{fontSize:48,fontWeight:800,marginTop:4}}>38°C</div>
-              <div style={{fontSize:13,color:T.textMuted}}>Sunny · {constituency}</div>
-              <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>Feels like 41°C · Humidity 42%</div>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              {[
-                {label:'Wind',   value:'12 km/h', icon:'💨'},
-                {label:'UV',     value:'Very High',icon:'☀️'},
-                {label:'Sunrise',value:'06:02 AM', icon:'🌅'},
-                {label:'Sunset', value:'06:38 PM', icon:'🌇'},
-              ].map((w,i)=>(
-                <div key={i} style={{background:T.bg2,borderRadius:10,padding:'12px',border:`1px solid ${T.border}`,textAlign:'center'}}>
-                  <div style={{fontSize:20}}>{w.icon}</div>
-                  <div style={{fontSize:14,fontWeight:700,color:T.text,marginTop:4}}>{w.value}</div>
-                  <div style={{fontSize:10,color:T.textMuted}}>{w.label}</div>
+            {(weatherLoading && !weather) ? (
+              <div style={{background:`linear-gradient(135deg,#0d2a6e,#06153a)`,borderRadius:16,padding:'30px 20px',border:`1px solid rgba(100,150,255,0.2)`,textAlign:'center',color:'#fff'}}>
+                <div style={{fontSize:34}}>⏳</div>
+                <div style={{fontSize:14,marginTop:8,opacity:0.85}}>Loading weather…</div>
+                <div style={{fontSize:12,opacity:0.7,marginTop:2}}>{weatherCity}</div>
+              </div>
+            ) : (weatherError || !weather) ? (
+              <div style={{background:`linear-gradient(135deg,#0d2a6e,#06153a)`,borderRadius:16,padding:'30px 20px',border:`1px solid rgba(100,150,255,0.2)`,textAlign:'center',color:'#fff'}}>
+                <div style={{fontSize:34}}>🌫️</div>
+                <div style={{fontSize:14,marginTop:8,opacity:0.85}}>Weather unavailable</div>
+                <div style={{fontSize:12,opacity:0.7,marginTop:2}}>{weatherCity}</div>
+              </div>
+            ) : (
+              <>
+                <div style={{background:`linear-gradient(135deg,#0d2a6e,#06153a)`,borderRadius:16,padding:'20px',border:`1px solid rgba(100,150,255,0.2)`,textAlign:'center',color:'#fff'}}>
+                  <div style={{fontSize:56}}>{weatherEmoji(weather.main)}</div>
+                  <div style={{fontSize:48,fontWeight:800,marginTop:4}}>{weather.temp}°C</div>
+                  <div style={{fontSize:13,color:'rgba(255,255,255,0.78)'}}>{weather.main || 'Weather'} · {weatherCity}</div>
+                  <div style={{fontSize:11,color:'rgba(255,255,255,0.7)',marginTop:4}}>Feels like {weather.feelsLike}°C · Humidity {weather.humidity}%</div>
                 </div>
-              ))}
-            </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                  {[
+                    {label:'Wind',   value: weather.wind!=null ? `${weather.wind} km/h` : '—', icon:'💨'},
+                    {label:'Sunrise',value: fmtTime(weather.sunrise), icon:'🌅'},
+                    {label:'Sunset', value: fmtTime(weather.sunset),  icon:'🌇'},
+                  ].map((w,i)=>(
+                    <div key={i} style={{background:T.bg2,borderRadius:10,padding:'12px',border:`1px solid ${T.border}`,textAlign:'center'}}>
+                      <div style={{fontSize:20}}>{w.icon}</div>
+                      <div style={{fontSize:14,fontWeight:700,color:T.text,marginTop:4}}>{w.value}</div>
+                      <div style={{fontSize:10,color:T.textMuted}}>{w.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

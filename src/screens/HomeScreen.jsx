@@ -1292,9 +1292,12 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         <LiveStrip activeChannel={activeChannel} allChannels={LIVE_CHANNELS} onNavigate={onNavigate} />
 
         {/* ══ ROTATING UPLOAD CTA — two messages swap every 3.5s ══ */}
-        <Reveal>
-          <UploadCtaBanner onNavigate={onNavigate} />
-        </Reveal>
+        {/* Hidden once the user is signed in (no need to prompt them to register). */}
+        {!isAuthenticated && (
+          <Reveal>
+            <UploadCtaBanner onNavigate={onNavigate} />
+          </Reveal>
+        )}
 
         {/* ── CLASSIFIEDS (Kurnool Local) — moved to top per request ─ */}
         <Reveal delay={0.05}>
