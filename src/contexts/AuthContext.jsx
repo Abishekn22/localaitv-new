@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from '../api/client.js';
 
 const STORAGE_KEY_TOKEN = 'localaitv.auth.token';
@@ -18,6 +18,15 @@ function writeJSON(key, value) {
     if (value == null) localStorage.removeItem(key);
     else localStorage.setItem(key, JSON.stringify(value));
   } catch {}
+}
+
+// True when the user object indicates a verified account (handles the several
+// shapes the backend returns: is_verified bool/1/'1', verified 'yes'/'true').
+export function isUserVerified(u) {
+  if (!u) return false;
+  if (u.is_verified === true || u.is_verified === 1 || u.is_verified === '1') return true;
+  const v = String(u.verified == null ? '' : u.verified).toLowerCase();
+  return v === 'yes' || v === 'true' || v === '1';
 }
 
 // Public helper — reads the cached user (with is_verified) without hitting the network.
@@ -48,6 +57,14 @@ export function AuthProvider({ children }) {
     setUserState(u || null);
     writeJSON(STORAGE_KEY_USER, u || null);
   }, []);
+
+  // Merge a partial update into the stored user (reads the persisted copy first
+  // so concurrent/interval callers never clobber each other with stale state).
+  const patchUser = useCallback((partial) => {
+    if (!partial) return;
+    const prev = readJSON(STORAGE_KEY_USER) || {};
+    setUser({ ...prev, ...partial });
+  }, [setUser]);
 
   const setSession = useCallback(({ token: t, user: u }) => {
     if (t) setToken(t);
@@ -110,17 +127,49 @@ export function AuthProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Resolve role + verification once per session (POST /users/:id/role) so the
+  // admin gating and the upload-verification gate reflect the real status.
+  const _roleCheckedFor = useRef(null);
+  useEffect(() => {
+    const uid = user && user.id;
+    if (!token || !uid || _roleCheckedFor.current === uid) return;
+    _roleCheckedFor.current = uid;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/users/${uid}/role`, {
+          method: 'GET',
+          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+          credentials: 'include',
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data && (data.role || 'is_verified' in data)) {
+          patchUser({
+            ...(data.role ? { role: data.role } : {}),
+            ...('is_verified' in data ? { is_verified: data.is_verified } : {}),
+            ...('verified' in data ? { verified: data.verified } : {}),
+          });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, user && user.id]);
+
   const value = useMemo(() => ({
     token,
     user,
     loading,
     isAuthenticated: !!token,
+    isVerified: isUserVerified(user),
     setSession,
     setUser,
+    patchUser,
     setToken,
     refreshUser,
     logout,
-  }), [token, user, loading, setSession, setUser, setToken, refreshUser, logout]);
+  }), [token, user, loading, setSession, setUser, patchUser, setToken, refreshUser, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

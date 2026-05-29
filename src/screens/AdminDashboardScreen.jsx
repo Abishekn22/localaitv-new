@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 function AdminDashboardScreen({ onBack }) {
   const { T } = useAppTheme();
+  const { token, logout } = useAuth();
   const [role, setRole] = useState('super');   // super | master | admin
   const [view, setView] = useState('home');    // home | <moduleKey>
   const [period, setPeriod] = useState('today'); // time filter for analytics
@@ -13,6 +15,105 @@ function AdminDashboardScreen({ onBack }) {
   const [editHead, setEditHead] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editPhotos, setEditPhotos] = useState([]);
+
+  // ── Real admin API layer (main backend, logged-in admin JWT) ──────────────
+  const adminFetch = useCallback(async (path, opts = {}) => {
+    const hasBody = opts.body != null && !(opts.body instanceof FormData);
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...opts,
+      headers: {
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(opts.headers || {}),
+      },
+    });
+    if (res.status === 401 || res.status === 403) { logout?.(); throw new Error('Session expired — please sign in again.'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data && data.message) || `Request failed (${res.status})`);
+    return data;
+  }, [token, logout]);
+
+  // Reports (GET /webhooks/reports) — citizen-submitted news reports.
+  const [reports, setReports] = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsErr, setReportsErr] = useState('');
+  const loadReports = useCallback(async () => {
+    setReportsLoading(true); setReportsErr('');
+    try {
+      const d = await adminFetch('/webhooks/reports?date=&email=&offset=0&limit=200');
+      setReports(d.data || d.items || (Array.isArray(d) ? d : []));
+    } catch (e) { setReportsErr(e.message); } finally { setReportsLoading(false); }
+  }, [adminFetch]);
+
+  // Users (GET /users) — user management.
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersErr, setUsersErr] = useState('');
+  const loadUsers = useCallback(async () => {
+    setUsersLoading(true); setUsersErr('');
+    try {
+      const d = await adminFetch('/users');
+      setUsers(d.users || d.data || (Array.isArray(d) ? d : []));
+    } catch (e) { setUsersErr(e.message); } finally { setUsersLoading(false); }
+  }, [adminFetch]);
+
+  // Locations (GET /locations).
+  const [locations, setLocations] = useState([]);
+  const loadLocations = useCallback(async () => {
+    try {
+      const d = await adminFetch('/locations');
+      setLocations(d.locations || d.data || (Array.isArray(d) ? d : []));
+    } catch (e) { /* non-blocking */ }
+  }, [adminFetch]);
+
+  // Fetch each module's data when it opens.
+  useEffect(() => {
+    if (view === 'moderation') loadReports();
+    if (view === 'users') { loadUsers(); loadLocations(); }
+  }, [view, loadReports, loadUsers, loadLocations]);
+
+  // ── Report actions ──
+  const editReportSubject = async (id) => {
+    const cur = reports.find(r => r.id === id);
+    const next = window.prompt('Edit report subject:', cur?.subject || '');
+    if (next == null || next.trim() === '' || next === cur?.subject) return;
+    try { await adminFetch(`/webhooks/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ subject: next.trim() }) });
+      setReports(rs => rs.map(r => r.id === id ? { ...r, subject: next.trim() } : r));
+    } catch (e) { alert(e.message); }
+  };
+  const deleteReport = async (id) => {
+    if (!window.confirm('Delete this report permanently?')) return;
+    try { await adminFetch(`/webhooks/reports/${id}`, { method: 'DELETE' });
+      setReports(rs => rs.filter(r => r.id !== id));
+    } catch (e) { alert(e.message); }
+  };
+
+  // ── User actions ──
+  const verifyUser = async (id) => {
+    try { await adminFetch(`/users/${id}/verify`, { method: 'PATCH' });
+      setUsers(us => us.map(u => u.id === id ? { ...u, is_verified: 1 } : u));
+    } catch (e) { alert(e.message); }
+  };
+  const rejectUser = async (id) => {
+    const reason = window.prompt('Reason for rejecting verification:');
+    if (reason == null || reason.trim() === '') return;
+    try { await adminFetch(`/users/${id}/reject-verification`, { method: 'PATCH', body: JSON.stringify({ reason: reason.trim() }) });
+      setUsers(us => us.map(u => u.id === id ? { ...u, is_verified: 0 } : u));
+    } catch (e) { alert(e.message); }
+  };
+  const deleteUser = async (id) => {
+    if (!window.confirm('Delete this user permanently?')) return;
+    try { await adminFetch(`/users/${id}`, { method: 'DELETE' });
+      setUsers(us => us.filter(u => u.id !== id));
+    } catch (e) { alert(e.message); }
+  };
+
+  // Resolve a numeric location id ("285") to a readable name for display.
+  const locName = (loc) => {
+    if (loc == null || loc === '') return '';
+    const hit = locations.find(l => String(l.id) === String(loc));
+    return hit ? (hit.name || hit.constituency || String(loc)) : String(loc);
+  };
 
   const ROLES = {
     super:  { label:'Super Admin',  scope:'🌐 All India · all states · full control' },
@@ -1085,37 +1186,50 @@ function AdminDashboardScreen({ onBack }) {
     const m = MODULES.find(x => x.key === view);
     if (m && m.need && !can(m.need)) return <Locked need={m.need} />;
 
-    if (view === 'moderation') return (
-      <div>
-        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}}>
-          {['All','News','Birthday','Rental','Vehicle','Jobs'].map(f => (
-            <span key={f} style={{fontSize:11,fontWeight:700,color:f==='All'?'#fff':T.textMuted,
-              background:f==='All'?'#D0021B':T.bg3,border:`1px solid ${T.border}`,
-              borderRadius:20,padding:'5px 12px'}}>{f}</span>
-          ))}
-        </div>
-        {role==='admin' && <div style={{...cardS,background:'rgba(245,158,11,0.1)',borderColor:'rgba(245,158,11,0.4)',fontSize:12,color:'#F59E0B'}}>📍 Queue auto-filtered to your assigned states (AP, TG). RLS enforced at DB level.</div>}
-        {QUEUE.map((q,i) => (
-          <div key={i} style={{...cardS, borderColor: q.flag?'rgba(239,68,68,0.45)':T.border}}>
-            <div style={{display:'flex',justifyContent:'space-between',gap:8,marginBottom:6}}>
-              <span style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4}}>{q.t}</span>
-              <Chip txt={q.st.replace(/_/g,' ')} c={STC[q.st]} />
-            </div>
-            <div style={{fontSize:11.5,color:T.textMuted,marginBottom:q.lock?6:10}}>
-              {q.cat} · {q.loc} · 👤 {q.by} · {q.age} ago {q.flag && <span style={{color:'#EF4444',fontWeight:700}}>· ⚠️ spam/NSFW flag</span>}
-            </div>
-            {q.lock && <div style={{fontSize:11,color:q.mine?'#3B82F6':'#EF4444',fontWeight:700,marginBottom:8}}>{q.lock}</div>}
-            <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
-              {['✅ Approve','✏️ Modify+Approve','❌ Reject','↗ Escalate'].map(b => (
-                <span key={b} style={{fontSize:11,fontWeight:700,color:T.text,
-                  background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px'}}>{b}</span>
-              ))}
-            </div>
+    if (view === 'moderation') {
+      const _mediaHost = API_BASE.replace(/\/api\/?$/, '');
+      const _mediaUrl = (p) => !p ? '' : (/^https?:\/\//i.test(p) ? p : `${_mediaHost}/${String(p).replace(/^\//, '')}`);
+      const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }); };
+      return (
+        <div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+            <SecH>Reports {reports.length ? `· ${reports.length}` : ''}</SecH>
+            <button onClick={loadReports} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
           </div>
-        ))}
-        <div style={{fontSize:11,color:T.textMuted,textAlign:'center',marginTop:6}}>Atomic claim/lock · 30-min auto-release · one admin owns an item at a time</div>
-      </div>
-    );
+          {reportsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{reportsErr}</div>}
+          {reportsLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading reports…</div>}
+          {!reportsLoading && !reportsErr && reports.length === 0 && (
+            <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No reports found.</div>
+          )}
+          {reports.map((r,i) => {
+            const vids = [].concat(r.video_path || r.video_paths || []).filter(Boolean);
+            const imgs = [].concat(r.image_path || r.image_paths || []).filter(Boolean);
+            const auds = [].concat(r.audio_path || r.audio_paths || []).filter(Boolean);
+            return (
+              <div key={r.id || i} style={{...cardS}}>
+                <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,marginBottom:5}}>
+                  {r.subject || '(no subject)'}
+                </div>
+                <div style={{fontSize:11.5,color:T.textMuted,marginBottom:8}}>
+                  👤 {r.name || '—'}{r.email?` · ${r.email}`:''}{r.created_at?` · ${fmtDate(r.created_at)}`:''}
+                </div>
+                {(vids.length || imgs.length || auds.length) > 0 && (
+                  <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:8}}>
+                    {vids.map((p,j)=><a key={'v'+j} href={_mediaUrl(p)} target="_blank" rel="noreferrer" style={{fontSize:10.5,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.4)',borderRadius:7,padding:'4px 8px',textDecoration:'none'}}>🎬 Video {vids.length>1?j+1:''}</a>)}
+                    {imgs.map((p,j)=><a key={'i'+j} href={_mediaUrl(p)} target="_blank" rel="noreferrer" style={{fontSize:10.5,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.4)',borderRadius:7,padding:'4px 8px',textDecoration:'none'}}>🖼 Image {imgs.length>1?j+1:''}</a>)}
+                    {auds.map((p,j)=><a key={'a'+j} href={_mediaUrl(p)} target="_blank" rel="noreferrer" style={{fontSize:10.5,fontWeight:700,color:'#8B5CF6',background:'rgba(139,92,246,0.12)',border:'1px solid rgba(139,92,246,0.4)',borderRadius:7,padding:'4px 8px',textDecoration:'none'}}>🔊 Audio {auds.length>1?j+1:''}</a>)}
+                  </div>
+                )}
+                <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
+                  <button onClick={()=>editReportSubject(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#3B82F6,#1D4ED8)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✏️ Edit subject</button>
+                  <button onClick={()=>deleteReport(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
 
     if (view === 'workflow') {
       const steps = [
@@ -1183,13 +1297,6 @@ function AdminDashboardScreen({ onBack }) {
     }
 
     if (view === 'users') {
-      const admins = [
-        ['Koneti Mohan Reddy','Super Admin','All India','#D0021B','Active'],
-        ['Priya Senior','Master Admin','All states','#8B5CF6','Active'],
-        ['Ravi Kumar','Admin','AP, TG (Telugu)','#3B82F6','Active'],
-        ['Lakshmi Devi','Admin','AP, TG (Telugu)','#3B82F6','Active'],
-        ['Karthik N','Admin','Karnataka (Kannada)','#3B82F6','Suspended'],
-      ];
       const matrix = [
         ['Create Master Admin','✅','❌','❌'],['Create Admin','✅','✅','❌'],
         ['Suspend lower tier','✅','✅ admins','❌'],['Geographic access','All','All','Assigned'],
@@ -1197,20 +1304,45 @@ function AdminDashboardScreen({ onBack }) {
         ['All-India analytics','✅','✅','❌'],['Cancel approved jobs','✅','✅','❌'],
         ['Audit log access','All','Team','Own'],
       ];
+      const palette = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#D0021B','#0EA5E9'];
       return (
         <div>
-          <SecH>Admin accounts</SecH>
-          {admins.map((a,i) => (
-            <div key={i} style={{...cardS,display:'flex',alignItems:'center',gap:10}}>
-              <div style={{width:34,height:34,borderRadius:'50%',background:a[3],color:'#fff',
-                display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:14}}>{a[0][0]}</div>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:700,fontSize:13.5,color:T.text}}>{a[0]}</div>
-                <div style={{fontSize:11,color:T.textMuted}}>{a[1]} · {a[2]}</div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+            <SecH>Users {users.length ? `· ${users.length}` : ''}</SecH>
+            <button onClick={loadUsers} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
+          </div>
+          {usersErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{usersErr}</div>}
+          {usersLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading users…</div>}
+          {!usersLoading && !usersErr && users.length === 0 && (
+            <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No users found.</div>
+          )}
+          {users.map((u,i) => {
+            const verified = u.is_verified === 1 || u.is_verified === true || u.is_verified === '1';
+            return (
+              <div key={u.id || i} style={{...cardS}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                  <div style={{width:36,height:36,borderRadius:'50%',background:palette[i%palette.length],color:'#fff',
+                    display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:15,flexShrink:0}}>
+                    {(u.name||u.phone||'?').toString().charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13.5,color:T.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{u.name||'—'}</div>
+                    <div style={{fontSize:11,color:T.textMuted,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                      {u.phone||u.email||'—'} · {u.role||'user'}{u.location?` · 📍 ${locName(u.location)}`:''}
+                    </div>
+                  </div>
+                  <Chip txt={verified?'Verified':'Unverified'} c={verified?'#10B981':'#F59E0B'} />
+                </div>
+                <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
+                  {!verified && (
+                    <button onClick={()=>verifyUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✅ Verify</button>
+                  )}
+                  <button onClick={()=>rejectUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#F59E0B,#B45309)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✋ Reject</button>
+                  <button onClick={()=>deleteUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                </div>
               </div>
-              <Chip txt={a[4]} c={a[4]==='Active'?'#10B981':'#EF4444'} />
-            </div>
-          ))}
+            );
+          })}
           <div style={{display:'flex',gap:8,marginTop:4,marginBottom:6}}>
             <span style={{flex:1,textAlign:'center',fontSize:11.5,fontWeight:700,
               color:can('createMaster')?'#fff':T.textMuted,background:can('createMaster')?'#8B5CF6':T.bg3,
