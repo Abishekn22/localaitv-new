@@ -20,12 +20,6 @@ const _isDev = !!_env.DEV;
 
 // ── URL 1 — main app backend ───────────────────────────────────────────────
 const DEV_API_BASE  = 'https://localaitv.com/api';
-// API client — talks to the LocalAI backend.
-// Base URL switches by environment:
-//   • Vite dev server (`npm run dev`) → http://localhost:5000/api
-//   • Production build               → https://aiservices.localaitv.com/api
-// Override either with VITE_API_BASE in a .env file.
-const DEV_API_BASE  = 'http://locahost:5000/api';
 const PROD_API_BASE = 'https://localaitv.com/api';
 export const API_BASE = _env.VITE_API_BASE || (_isDev ? DEV_API_BASE : PROD_API_BASE);
 
