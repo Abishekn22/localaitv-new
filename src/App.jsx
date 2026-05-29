@@ -82,6 +82,7 @@ import PermissionSheet from './components/sheets/PermissionSheet.jsx';
 import Toast           from './components/Toast.jsx';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
+import { NotificationProvider } from './contexts/NotificationContext.jsx';
 
 // Lazy wrapper for the 'shortsfeed' route. Mounting this fires the
 // /api/incidents fetch; the fetch never runs when the user isn't on
@@ -108,7 +109,7 @@ function App() {
   const { isDark: appIsDark } = useAppTheme();
   // Auth gate — logged-in users go straight to the upload page; guests are
   // routed to the registration / login screen first.
-  const { isAuthenticated, isVerified } = useAuth();
+  const { isAuthenticated, isVerified, checkVerificationOnce } = useAuth();
 
   // Upload + every upload sub-form require a VERIFIED account.
   const VERIFIED_ONLY_SCREENS = [
@@ -265,7 +266,7 @@ function App() {
     logoTapTimer.current = setTimeout(() => setLogoTaps(0), 2000);
   }
 
-  function navigate(to) {
+  async function navigate(to) {
     // Any explicit navigation cancels a pending "return to channel" hand-off.
     setBulletinReturnChannel(null);
     // Upload requires a signed-in user. Guests tapping Upload (bottom nav or
@@ -278,15 +279,20 @@ function App() {
       setScreen('uploadregister');
       return;
     }
-    // Signed in but not yet verified → block upload / all upload forms and send
-    // the user to their Profile (where verification status is polled live).
-    if (isAuthenticated && !isVerified && VERIFIED_ONLY_SCREENS.includes(to)) {
-      showToast('Your account is pending verification — uploads unlock once verified.');
-      setNavActive('profile');
-      setSelectedNews(null);
-      setSelectedChannel(null);
-      setScreen('profile');
-      return;
+    // Signed in + heading to an upload screen → run a SINGLE fresh verification
+    // check (one request per entry, not a poll). Fall back to the cached flag
+    // if the request fails. If not verified, send the user to their Profile.
+    if (isAuthenticated && VERIFIED_ONLY_SCREENS.includes(to)) {
+      const fresh = await checkVerificationOnce();
+      const verifiedNow = fresh == null ? isVerified : fresh;
+      if (!verifiedNow) {
+        showToast('Your account is pending verification — uploads unlock once verified.');
+        setNavActive('profile');
+        setSelectedNews(null);
+        setSelectedChannel(null);
+        setScreen('profile');
+        return;
+      }
     }
     setNavActive(to);
     setSelectedNews(null);
@@ -573,7 +579,9 @@ function AppRoot() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <App />
+        <NotificationProvider>
+          <App />
+        </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );

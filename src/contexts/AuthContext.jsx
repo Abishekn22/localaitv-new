@@ -84,6 +84,35 @@ export function AuthProvider({ children }) {
     } catch {}
   }, []);
 
+  // One-shot verification/role check (NOT a poll). Hits GET /users/:id/role a
+  // single time, patches the cached user with the fresh role + verification
+  // flags, and resolves to the boolean verified status (or null on failure).
+  // Used by the upload gate so a fresh status is read once per upload entry.
+  const checkVerificationOnce = useCallback(async () => {
+    const uid = user && user.id;
+    if (!token || !uid) return null;
+    try {
+      const res = await fetch(`${API_BASE}/users/${uid}/role`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+        credentials: 'include',
+      });
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => null);
+      if (!data) return null;
+      const patch = {
+        ...(data.role ? { role: data.role } : {}),
+        ...('is_verified' in data ? { is_verified: data.is_verified } : {}),
+        ...('verified' in data ? { verified: data.verified } : {}),
+      };
+      patchUser(patch);
+      const prev = readJSON(STORAGE_KEY_USER) || {};
+      return isUserVerified({ ...prev, ...patch });
+    } catch {
+      return null;
+    }
+  }, [token, user, patchUser]);
+
   const refreshUser = useCallback(async () => {
     if (!token) return null;
     setLoading(true);
@@ -168,8 +197,9 @@ export function AuthProvider({ children }) {
     patchUser,
     setToken,
     refreshUser,
+    checkVerificationOnce,
     logout,
-  }), [token, user, loading, setSession, setUser, patchUser, setToken, refreshUser, logout]);
+  }), [token, user, loading, setSession, setUser, patchUser, setToken, refreshUser, checkVerificationOnce, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
