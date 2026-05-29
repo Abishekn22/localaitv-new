@@ -2155,11 +2155,11 @@ function AdminDashboardScreen({ onBack }) {
         <div style={{fontSize:12.5,color:T.text,fontWeight:700}}>{R.scope}</div>
       </div>
 
-      {/* KPI grid — "Pending Review" tile is clickable and opens the review queue */}
+      {/* KPI grid — "Pending Review" tile opens the Moderation Queue */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:6}}>
         {KPI.map((k,i)=>{
           const isPending = k.label === 'Pending Review';
-          const onClick = isPending ? ()=>pushDrill({type:'pending'}) : undefined;
+          const onClick = isPending ? ()=>setView('moderation') : undefined;
           return (
             <div key={i} onClick={onClick} style={{
               background:T.bg2,
