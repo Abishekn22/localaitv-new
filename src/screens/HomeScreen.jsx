@@ -1191,11 +1191,12 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         }}>
           {activeChannel?.live ? (
             <div style={{position:'relative',paddingBottom:'56.25%',height:0,background:'#000'}}>
-              {/* Audio ON by default (mute=0) so the live channel plays with sound on
-                  load and on every channel switch (no manual unmute needed).
+              {/* Muted autoplay (mute=1): browsers BLOCK unmuted autoplay without a
+                  prior user gesture, so on initial page open / location change the
+                  video would otherwise stay paused. Muted guarantees it always
+                  auto-plays; the viewer taps YouTube's unmute for sound.
                   key={channel id} → the iframe fully remounts on channel switch, so
-                  the new channel starts cleanly with sound (the switch tap is the
-                  user gesture browsers require).
+                  the new channel starts cleanly.
                   The iframe is REMOVED from the DOM whenever another video surface is
                   open (Shorts / feed viewer / fullscreen bulletin-live). Removing it
                   hard-stops its audio — guaranteeing only ONE audio plays anywhere.
@@ -1204,7 +1205,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               <iframe
                 key={activeChannel.id}
                 style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',border:'none'}}
-                src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[activeChannel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1`}
+                src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[activeChannel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=1&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1`}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
                 loading="eager"

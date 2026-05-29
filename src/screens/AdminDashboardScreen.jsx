@@ -19,6 +19,9 @@ function AdminDashboardScreen({ onBack }) {
   const [period, setPeriod] = useState('today'); // time filter for analytics
   const [drill, setDrill] = useState([]);       // drill-down navigation stack
   const pushDrill = (f) => setDrill(d => [...d, f]);
+  const scrollRef = useRef(null);               // main scroll container
+  // Always open a view/drill from the top — never auto-land at the bottom.
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [view, drill.length]);
   // Pending-review edit state (lifted so it survives child re-mounts)
   const [editMode, setEditMode] = useState(false);
   const [editHead, setEditHead] = useState('');
@@ -347,8 +350,8 @@ function AdminDashboardScreen({ onBack }) {
   );
   const KV = ({ k, v, vc }) => (
     <div style={{display:'flex',justifyContent:'space-between',gap:10,padding:'7px 0',borderBottom:`1px solid ${T.border}`}}>
-      <span style={{fontSize:12.5,color:T.textMuted}}>{k}</span>
-      <span style={{fontSize:12.5,fontWeight:700,color:vc||T.text,textAlign:'right'}}>{v}</span>
+      <span style={{fontSize:12.5,color:T.textMuted,flexShrink:0}}>{k}</span>
+      <span style={{fontSize:12.5,fontWeight:700,color:vc||T.text,textAlign:'right',minWidth:0,wordBreak:'break-word',overflowWrap:'anywhere'}}>{v}</span>
     </div>
   );
   const Locked = ({ need }) => (
@@ -1307,7 +1310,7 @@ function AdminDashboardScreen({ onBack }) {
           <textarea value={eSubject} onChange={e=>setESubject(e.target.value)}
             style={{width:'100%',minHeight:54,boxSizing:'border-box',background:T.bg2,color:T.text,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 11px',fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:14,fontWeight:700,resize:'vertical'}}/>
         ) : (
-          <div style={{...cardS,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:14,fontWeight:700,color:T.text,lineHeight:1.45}}>
+          <div style={{...cardS,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:14,fontWeight:700,color:T.text,lineHeight:1.45,wordBreak:'break-word',overflowWrap:'anywhere'}}>
             {live.subject || '(no subject)'}
           </div>
         )}
@@ -1317,7 +1320,7 @@ function AdminDashboardScreen({ onBack }) {
           <textarea value={eMessage} onChange={e=>setEMessage(e.target.value)}
             style={{width:'100%',minHeight:120,boxSizing:'border-box',background:T.bg2,color:T.text,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 11px',fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,resize:'vertical'}}/>
         ) : (
-          <div style={{...cardS,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>
+          <div style={{...cardS,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap',wordBreak:'break-word',overflowWrap:'anywhere'}}>
             {live.message || '—'}
           </div>
         )}
@@ -2225,6 +2228,7 @@ function AdminDashboardScreen({ onBack }) {
         </div>
       </div>
       <div
+        ref={scrollRef}
         onScroll={(e)=>{
           if (view !== 'moderation' || drill.length) return;
           const el = e.currentTarget;
