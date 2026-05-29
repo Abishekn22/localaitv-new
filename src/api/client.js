@@ -3,7 +3,7 @@
 //   • Vite dev server (`npm run dev`) → http://localhost:5000/api
 //   • Production build               → https://aiservices.localaitv.com/api
 // Override either with VITE_API_BASE in a .env file.
-const DEV_API_BASE  = 'https://locahost:5000/api';
+const DEV_API_BASE  = 'http://locahost:5000/api';
 const PROD_API_BASE = 'https://localaitv.com/api';
 export const API_BASE =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) ||
