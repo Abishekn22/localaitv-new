@@ -694,7 +694,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               ].map((m,i,arr)=>(
                 <MenuRow key={`g2-${i}`} item={m}
                   isLast={i===arr.length-1}
-                  onClick={()=>{ setShowHamburger(false); try { window.__openHamburgerOnLoad = true; } catch(e){} if(m.action) onNavigate(m.action); }}/>
+                  onClick={()=>{ setShowHamburger(false); try { window.__openHamburgerOnLoad = true; } catch(e){} if(m.action){ const dest = (m.action==='dashboard' && !isAuthenticated) ? 'profile' : m.action; onNavigate(dest); } }}/>
               ))}
 
               {/* divider */}
