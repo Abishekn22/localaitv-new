@@ -1,44 +1,38 @@
 // API client — talks to TWO LocalAI backends.
 //
-//   API_BASE   (URL 1) = https://localaitv.com/api
-//       Main app endpoints: news, bulletins, incidents, auth, election,
-//       leaderboard, projects, utility (veg/weather), contacts, reports, users…
+//   API_BASE   (main)       → http://localhost:5000/api   (dev)
+//                            https://localaitv.com/api     (prod)
+//       Most app endpoints: news, bulletins, incidents, auth, reports,
+//       election, leaderboard, projects, utility, users…
 //
-//   API_BASE_2 (URL 2) = https://aiservices.localaitv.com/api
-//       aimodelsss endpoints — the classifieds feed + all the forms + upload.
-//       This is the server that holds the database for those.
+//   API_BASE_2 (aiservices) → https://aiservices.localaitv.com   (local + prod)
+//       The classifieds feed + all the upload forms (& /upload-file) live here.
 //
 // Routing:
-//   • apiCall('/classifieds…')  → URL 2   (aimodelsss read feed)
-//   • apiCall(anything else)    → URL 1   (main app)
-//   • `${API}/…` (forms+upload) → URL 2   (API alias points at URL 2)
+//   • apiCall('/classifieds…')   → aiservices (URL 2)
+//   • apiCall(anything else)     → main (URL 1)
+//   • apiCall2(…)                → aiservices (URL 2), explicit
+//   • `${API}/…`  (forms+upload) → aiservices (URL 2)  — API alias points there
+//   • `${API_BASE}/…` (auth/reports/…) → main (URL 1)
 //
 // Override either base with VITE_API_BASE / VITE_API_BASE_2 in a .env file.
 
 const _env   = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
 const _isDev = !!_env.DEV;
 
-// ── URL 1 — main app backend ───────────────────────────────────────────────
-const DEV_API_BASE  = 'https://localaitv.com/api';
-// API client — talks to the LocalAI backend.
-// Base URL switches by environment:
-//   • Vite dev server (`npm run dev`) → http://localhost:5000/api
-//   • Production build               → https://aiservices.localaitv.com/api
-// Override either with VITE_API_BASE in a .env file.
-const DEV_API_BASE  = 'http://locahost:5000/api';
+// ── URL 1 — main backend (localhost in dev, localaitv.com in prod) ──
+const DEV_API_BASE  = 'http://localhost:5000/api';
 const PROD_API_BASE = 'https://localaitv.com/api';
 export const API_BASE = _env.VITE_API_BASE || (_isDev ? DEV_API_BASE : PROD_API_BASE);
 
-// ── URL 2 — aimodelsss backend (forms + classifieds + upload) ──────────────
-const DEV_API_BASE_2  = 'https://aiservices.localaitv.com/api';
-const PROD_API_BASE_2 = 'https://aiservices.localaitv.com/api';
-export const API_BASE_2 = _env.VITE_API_BASE_2 || (_isDev ? DEV_API_BASE_2 : PROD_API_BASE_2);
+// ── URL 2 — aiservices backend (same URL for local + prod) ──
+export const API_BASE_2 = _env.VITE_API_BASE_2 || 'https://aiservices.localaitv.com';
 
 export const YT_CHANNEL  = 'UClB3scGwKSfe3CmLYYFkDoQ';
 export const APP_VERSION = '1.0.6';
 
-// Read paths that live on the aimodelsss backend (URL 2). Everything else → URL 1.
-const _URL2_PREFIXES = ['/classifieds', '/utility/trains'];
+// Read paths that live on the aiservices backend (URL 2). Everything else → URL 1.
+const _URL2_PREFIXES = ['/classifieds'];
 function _baseFor(path) {
   return _URL2_PREFIXES.some(p => path.startsWith(p)) ? API_BASE_2 : API_BASE;
 }
@@ -61,16 +55,16 @@ async function _fetchJSON(base, path, opts = {}) {
   }
 }
 
-// GET/POST helper. Auto-routes by path (classifieds/trains → URL 2, rest → URL 1).
+// GET/POST helper. Auto-routes by path (classifieds → aiservices, rest → main).
 export async function apiCall(path, opts = {}) {
   return _fetchJSON(_baseFor(path), path, opts);
 }
 
-// Explicit helper for the aimodelsss backend (URL 2), if ever needed directly.
+// Explicit helper for the aiservices backend (URL 2).
 export async function apiCall2(path, opts = {}) {
   return _fetchJSON(API_BASE_2, path, opts);
 }
 
-// Convenience aliases. The forms + upload helper use `${API}` and must hit URL 2.
-export const API  = API_BASE_2;
-export const API2 = API_BASE_2;
+// Convenience aliases. Forms + upload use `${API}` and must hit aiservices (URL 2).
+export const API  = API_BASE_2;  // aiservices — forms + /upload-file
+export const API2 = API_BASE_2;  // aiservices
