@@ -4,8 +4,17 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 function AdminDashboardScreen({ onBack }) {
   const { T } = useAppTheme();
-  const { token, logout } = useAuth();
-  const [role, setRole] = useState('super');   // super | master | admin
+  const { token, logout, user, refreshUser } = useAuth();
+  // Map the logged-in user's DB role to a dashboard tier key.
+  const roleKeyFromUser = (r) => {
+    const s = String(r || '').toLowerCase();
+    if (s === 'superadmin' || s === 'super_admin' || s === 'super') return 'super';
+    if (s === 'master_admin' || s === 'master') return 'master';
+    return 'admin';
+  };
+  const [role, setRole] = useState(() => roleKeyFromUser(user?.role)); // locked to the user's own role
+  // Keep the tier in sync if the user/role resolves after mount.
+  useEffect(() => { setRole(roleKeyFromUser(user?.role)); }, [user?.role]);
   const [view, setView] = useState('home');    // home | <moduleKey>
   const [period, setPeriod] = useState('today'); // time filter for analytics
   const [drill, setDrill] = useState([]);       // drill-down navigation stack
@@ -27,28 +36,72 @@ function AdminDashboardScreen({ onBack }) {
         ...(opts.headers || {}),
       },
     });
-    if (res.status === 401 || res.status === 403) { logout?.(); throw new Error('Session expired — please sign in again.'); }
+    // Surface auth errors as a message — do NOT log the user out of the whole
+    // app just because one admin endpoint returned 401/403.
+    if (res.status === 401) throw new Error('Not authorized (401). Your session may have expired.');
+    if (res.status === 403) throw new Error('Access denied (403) — your role can’t access this.');
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((data && data.message) || `Request failed (${res.status})`);
     return data;
-  }, [token, logout]);
+  }, [token]);
 
   // Reports (GET /webhooks/reports) — citizen-submitted news reports.
+  const REPORTS_PAGE = 10; // infinite-scroll page size
   const [reports, setReports] = useState([]);
-  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsLoading, setReportsLoading] = useState(false);      // initial / first-page load
+  const [reportsLoadingMore, setReportsLoadingMore] = useState(false); // subsequent pages
+  const [reportsHasMore, setReportsHasMore] = useState(true);
   const [reportsErr, setReportsErr] = useState('');
-  const loadReports = useCallback(async () => {
-    setReportsLoading(true); setReportsErr('');
+  const [reportFilter, setReportFilter] = useState('all'); // moderation queue status filter
+  const [reportSearch, setReportSearch] = useState('');    // name / subject / email search
+  const [reportLocFilter, setReportLocFilter] = useState('all'); // location filter
+  const [reportDate, setReportDate] = useState('');        // YYYY-MM-DD date filter
+  const [reportStats, setReportStats] = useState(null);    // { total, byStatus, new } for KPIs
+
+  // Report counts (total + per-status) for the "Pending Review" KPI.
+  const loadReportStats = useCallback(async () => {
     try {
-      const d = await adminFetch('/webhooks/reports?date=&email=&offset=0&limit=200');
-      setReports(d.data || d.items || (Array.isArray(d) ? d : []));
-    } catch (e) { setReportsErr(e.message); } finally { setReportsLoading(false); }
+      const d = await adminFetch('/webhooks/reports/count');
+      setReportStats(d || null);
+    } catch { /* non-blocking — KPI falls back to a placeholder */ }
   }, [adminFetch]);
+
+  const fetchReportsPage = useCallback(async (offset) => {
+    const d = await adminFetch(`/webhooks/reports?offset=${offset}&limit=${REPORTS_PAGE}`);
+    return d.items || d.data || (Array.isArray(d) ? d : []);
+  }, [adminFetch]);
+
+  // First page — resets the list (used on open + Refresh).
+  const loadReports = useCallback(async () => {
+    setReportsLoading(true); setReportsErr(''); setReportsHasMore(true);
+    try {
+      const batch = await fetchReportsPage(0);
+      setReports(batch);
+      setReportsHasMore(batch.length === REPORTS_PAGE);
+    } catch (e) { setReportsErr(e.message); } finally { setReportsLoading(false); }
+  }, [fetchReportsPage]);
+
+  // Next page — appends. Guarded so overlapping scroll events can't double-fetch.
+  const loadMoreReports = useCallback(async () => {
+    if (reportsLoadingMore || !reportsHasMore || reportsLoading) return;
+    setReportsLoadingMore(true);
+    try {
+      const batch = await fetchReportsPage(reports.length);
+      setReports(prev => {
+        // de-dupe by id in case of overlap
+        const seen = new Set(prev.map(r => r.id));
+        return [...prev, ...batch.filter(r => !seen.has(r.id))];
+      });
+      setReportsHasMore(batch.length === REPORTS_PAGE);
+    } catch (e) { setReportsErr(e.message); } finally { setReportsLoadingMore(false); }
+  }, [fetchReportsPage, reports.length, reportsLoadingMore, reportsHasMore, reportsLoading]);
 
   // Users (GET /users) — user management.
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersErr, setUsersErr] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  const [promoteRole, setPromoteRole] = useState(null); // null | 'admin' | 'master_admin' — drives "pick a user to promote" mode
   const loadUsers = useCallback(async () => {
     setUsersLoading(true); setUsersErr('');
     try {
@@ -72,19 +125,64 @@ function AdminDashboardScreen({ onBack }) {
     if (view === 'users') { loadUsers(); loadLocations(); }
   }, [view, loadReports, loadUsers, loadLocations]);
 
+  // Load on mount: user list (Citizens KPI) + report counts (Pending Review KPI).
+  useEffect(() => { loadUsers(); loadReportStats(); }, [loadUsers, loadReportStats]);
+
+  // Refresh the logged-in user's live role/verification when the dashboard opens,
+  // so the role-locked tab + gating reflect any change made since login.
+  useEffect(() => { refreshUser?.(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
   // ── Report actions ──
+  // Generic status setter (Review→read, Approve→approved, etc.).
+  const setReportStatus = async (id, status) => {
+    try { await adminFetch(`/webhooks/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      setReports(rs => rs.map(r => r.id === id ? { ...r, status } : r));
+      loadReportStats(); // keep the Pending Review (new) count fresh
+    } catch (e) { alert(e.message); }
+  };
+  // Opening a report marks a brand-new one as "read" (fire-and-forget).
+  const markReportRead = (id) => {
+    const r = reports.find(x => x.id === id);
+    if (r && String(r.status || '').toLowerCase() === 'new') setReportStatus(id, 'read');
+  };
+  const approveReport = (id) => setReportStatus(id, 'approved');
+  // Revert an approved report — flips it back to "read".
+  const revertApproval = (id) => {
+    if (!window.confirm('Cancel this approval? The report will move back to Read status.')) return;
+    setReportStatus(id, 'read');
+  };
+  // Reject a report — sets "rejected" (red status). Available for any video.
+  const rejectReport = (id) => {
+    if (!window.confirm('Reject this report? It will move to Rejected (red) status.')) return;
+    setReportStatus(id, 'rejected');
+  };
+  // Open the full review + mark read.
+  const openReport = (r) => { markReportRead(r.id); pushDrill({ type: 'reportreview', report: r }); };
+  // Full edit: subject / message / image list. Returns true on success.
+  const saveReportEdits = async (id, fields) => {
+    const body = {};
+    if (typeof fields.subject === 'string') body.subject = fields.subject;
+    if (typeof fields.message === 'string') body.message = fields.message;
+    if (Array.isArray(fields.image_paths)) body.image_paths = fields.image_paths;
+    if (!Object.keys(body).length) return false;
+    try {
+      await adminFetch(`/webhooks/reports/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      setReports(rs => rs.map(r => r.id === id ? { ...r, ...body } : r));
+      return true;
+    } catch (e) { alert(e.message); return false; }
+  };
+  // Quick inline subject edit (used by the card's ✏️ button).
   const editReportSubject = async (id) => {
     const cur = reports.find(r => r.id === id);
     const next = window.prompt('Edit report subject:', cur?.subject || '');
     if (next == null || next.trim() === '' || next === cur?.subject) return;
-    try { await adminFetch(`/webhooks/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ subject: next.trim() }) });
-      setReports(rs => rs.map(r => r.id === id ? { ...r, subject: next.trim() } : r));
-    } catch (e) { alert(e.message); }
+    await saveReportEdits(id, { subject: next.trim() });
   };
   const deleteReport = async (id) => {
     if (!window.confirm('Delete this report permanently?')) return;
     try { await adminFetch(`/webhooks/reports/${id}`, { method: 'DELETE' });
       setReports(rs => rs.filter(r => r.id !== id));
+      loadReportStats();
     } catch (e) { alert(e.message); }
   };
 
@@ -108,12 +206,58 @@ function AdminDashboardScreen({ onBack }) {
     } catch (e) { alert(e.message); }
   };
 
+  const changeUserRole = async (id, newRole) => {
+    try { await adminFetch(`/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role: newRole }) });
+      setUsers(us => us.map(u => u.id === id ? { ...u, role: newRole } : u));
+    } catch (e) { alert(e.message); }
+  };
+
   // Resolve a numeric location id ("285") to a readable name for display.
   const locName = (loc) => {
     if (loc == null || loc === '') return '';
     const hit = locations.find(l => String(l.id) === String(loc));
     return hit ? (hit.name || hit.constituency || String(loc)) : String(loc);
   };
+
+  // ── Webhook /reports response helpers (mirrors reference admin User_reports.jsx) ──
+  // Report media lives on the production server (not localhost), so resolve against
+  // VITE_MEDIA_BASE (default https://localaitv.com) even in dev.
+  const reportMediaHost = (import.meta.env.VITE_MEDIA_BASE || 'https://localaitv.com').replace(/\/+$/, '');
+  const reportMediaUrl = (p) => {
+    if (!p) return '';
+    const c = String(p).replace(/\\/g, '/');
+    return /^https?:\/\//i.test(c) ? c : `${reportMediaHost}/${c.replace(/^\/+/, '')}`;
+  };
+  const reportToPaths = (val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(String).map(s => s.trim()).filter(Boolean);
+    if (typeof val === 'string') {
+      try { const p = JSON.parse(val); if (Array.isArray(p)) return p.map(String).map(s => s.trim()).filter(Boolean); } catch {}
+      return val.trim() ? [val.trim()] : [];
+    }
+    return [];
+  };
+  const reportMedia = (r) => {
+    const imgs = reportToPaths(r.image_paths); if (!imgs.length && r.image_path) imgs.push(String(r.image_path));
+    const vids = reportToPaths(r.video_paths); if (!vids.length && r.video_path) vids.push(String(r.video_path));
+    const auds = reportToPaths(r.audio_paths); if (!auds.length && r.audio_path) auds.push(String(r.audio_path));
+    return { imgs, vids, auds };
+  };
+  const reportTitle = (r) => r.subject ? r.subject : (r.message ? r.message.trim().slice(0, 80) + (r.message.length > 80 ? '…' : '') : '(no subject)');
+  const reportReporter = (r) => r.name || r.postedBy?.name || r.email || '—';
+  const reportLoc = (r) => r.locationAddress || (r.location_id ? locName(r.location_id) : '') || '';
+  const reportStatusColor = (s) => ({ new:'#F59E0B', read:'#3B82F6', pending:'#F59E0B', processing:'#0EA5E9', done:'#10B981', published:'#10B981', failed:'#EF4444', rejected:'#EF4444' })[String(s||'').toLowerCase()] || '#6B7280';
+  const fmtAge = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso); if (isNaN(d)) return '';
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+    const dd = Math.floor(h / 24); if (dd < 30) return dd + 'd ago';
+    return d.toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+  };
+  const fmtDateTime = (iso) => { if (!iso) return '—'; const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
 
   const ROLES = {
     super:  { label:'Super Admin',  scope:'🌐 All India · all states · full control' },
@@ -140,12 +284,12 @@ function AdminDashboardScreen({ onBack }) {
   // ── KPIs scale by role scope (super/master = all-India, admin = AP+TG) ──
   const wide = role !== 'admin';
   const KPI = [
-    { icon:'📋', label:'Pending Review',  value: wide ? '1,240' : '86',   c:'#F59E0B' },
+    { icon:'📋', label:'Pending Review',  value: reportStats ? Number(reportStats.new || 0).toLocaleString('en-IN') : '…',   c:'#F59E0B' },
     { icon:'⚙️', label:'In AI Pipeline',  value: wide ? '318'   : '22',   c:'#3B82F6' },
     { icon:'✅', label:'Published Today',  value: wide ? '4,870' : '410',  c:'#10B981' },
     { icon:'📺', label:'Live Channels',   value: wide ? '9'     : '9',    c:'#D0021B' },
     { icon:'🛑', label:'Dead-letter',     value: wide ? '7'     : '1',    c:'#EF4444' },
-    { icon:'👥', label:'Citizens',        value: wide ? '18,420': '3,120', c:'#8B5CF6' },
+    { icon:'👥', label:'Citizens',        value: usersLoading && !users.length ? '…' : users.length.toLocaleString('en-IN'), c:'#8B5CF6' },
   ];
 
   // ── 15 modules — Plan v1.3 functional areas. need = capability gate ──
@@ -215,7 +359,7 @@ function AdminDashboardScreen({ onBack }) {
         This area requires <b style={{color:T.text}}>{need}</b> access.<br/>
         Your current role: <b style={{color:'#D0021B'}}>{R.label}</b>.
       </div>
-      <div style={{marginTop:14,fontSize:11.5,color:T.textMuted}}>Switch role on the dashboard home to preview it.</div>
+      <div style={{marginTop:14,fontSize:11.5,color:T.textMuted}}>Contact a Super Admin if you need access.</div>
     </div>
   );
 
@@ -1104,6 +1248,148 @@ function AdminDashboardScreen({ onBack }) {
     );
   }
 
+  // ── Full report detail: every field + all media, with inline edit / approve / delete ──
+  function ReportReview({ report }) {
+    const live = reports.find(r => r.id === report.id) || report;
+    const { imgs, vids, auds } = reportMedia(live);
+    const st = String(live.status || 'new').toLowerCase();
+    const sc = reportStatusColor(st);
+    const loc = reportLoc(live);
+    const profilePic = live.profilePicture ? reportMediaUrl(live.profilePicture) : null;
+    const reporter = reportReporter(live);
+    const mediaCount = imgs.length + vids.length + auds.length;
+    const close = () => setDrill(d => d.slice(0, -1));
+
+    // ── Edit mode (subject / message / image removal) ──
+    const [editing, setEditing] = useState(false);
+    const [eSubject, setESubject] = useState(live.subject || '');
+    const [eMessage, setEMessage] = useState(live.message || '');
+    const [eImgs, setEImgs] = useState(imgs);
+    const [saving, setSaving] = useState(false);
+    const startEdit = () => { setESubject(live.subject || ''); setEMessage(live.message || ''); setEImgs(imgs); setEditing(true); };
+    const cancelEdit = () => setEditing(false);
+    const save = async () => {
+      setSaving(true);
+      const ok = await saveReportEdits(live.id, { subject: eSubject, message: eMessage, image_paths: eImgs });
+      setSaving(false);
+      if (ok) setEditing(false);
+    };
+
+    return (
+      <div>
+        {/* Reporter header */}
+        <div style={{...cardS,display:'flex',gap:12,alignItems:'center'}}>
+          {profilePic
+            ? <img src={profilePic} alt="" style={{width:54,height:54,borderRadius:'50%',objectFit:'cover',flexShrink:0}} onError={e=>{e.target.style.display='none';}}/>
+            : <div style={{width:54,height:54,borderRadius:'50%',background:'#3B82F6',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:22,flexShrink:0}}>{(reporter||'?').charAt(0).toUpperCase()}</div>}
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:800,fontSize:16,color:T.text}}>{reporter}</div>
+            {live.email && <div style={{fontSize:11.5,color:T.textMuted,wordBreak:'break-all'}}>{live.email}</div>}
+            {loc && <div style={{fontSize:11.5,color:T.textMuted}}>📍 {loc}</div>}
+          </div>
+          <Chip txt={st.charAt(0).toUpperCase()+st.slice(1)} c={sc} />
+        </div>
+
+        <SecH>Report details</SecH>
+        <div style={{...cardS,padding:0,overflow:'hidden'}}>
+          <KV k="Report id" v={live.id || '—'} />
+          <KV k="Status" v={st.charAt(0).toUpperCase()+st.slice(1)} vc={sc} />
+          {loc && <KV k="Location" v={loc} />}
+          <KV k="Reporter" v={reporter} />
+          {live.email && <KV k="Email" v={live.email} />}
+          <KV k="Submitted" v={fmtDateTime(live.created_at)} />
+          <KV k="Media files" v={`${mediaCount} (${vids.length} video · ${imgs.length} image · ${auds.length} audio)`} />
+          <div style={{padding:'4px 0'}}/>
+        </div>
+
+        <SecH>Headline / subject {editing && <span style={{color:'#F59E0B'}}>· editing</span>}</SecH>
+        {editing ? (
+          <textarea value={eSubject} onChange={e=>setESubject(e.target.value)}
+            style={{width:'100%',minHeight:54,boxSizing:'border-box',background:T.bg2,color:T.text,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 11px',fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:14,fontWeight:700,resize:'vertical'}}/>
+        ) : (
+          <div style={{...cardS,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:14,fontWeight:700,color:T.text,lineHeight:1.45}}>
+            {live.subject || '(no subject)'}
+          </div>
+        )}
+
+        <SecH>Message / content</SecH>
+        {editing ? (
+          <textarea value={eMessage} onChange={e=>setEMessage(e.target.value)}
+            style={{width:'100%',minHeight:120,boxSizing:'border-box',background:T.bg2,color:T.text,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 11px',fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,resize:'vertical'}}/>
+        ) : (
+          <div style={{...cardS,fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>
+            {live.message || '—'}
+          </div>
+        )}
+
+        {vids.length > 0 && (<>
+          <SecH>Videos · {vids.length}</SecH>
+          {vids.map((p,i)=>(
+            <div key={'v'+i} style={{...cardS,padding:0,overflow:'hidden'}}>
+              <video src={reportMediaUrl(p)} controls playsInline preload="metadata" style={{width:'100%',maxHeight:260,background:'#000',display:'block'}} onError={e=>{e.target.style.display='none';}}/>
+            </div>
+          ))}
+        </>)}
+
+        {(editing ? eImgs.length > 0 : imgs.length > 0) && (<>
+          <SecH>Images · {editing ? eImgs.length : imgs.length}{editing ? ' · tap × to remove' : ''}</SecH>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:9}}>
+            {(editing ? eImgs : imgs).map((p,i)=>(
+              editing ? (
+                <div key={'i'+i} onClick={()=>setEImgs(arr=>arr.filter((_,j)=>j!==i))}
+                  style={{aspectRatio:'1/1',background:T.bg3,backgroundImage:`url(${reportMediaUrl(p)})`,backgroundSize:'cover',backgroundPosition:'center',borderRadius:9,border:`1px solid ${T.border}`,position:'relative',cursor:'pointer'}}>
+                  <div style={{position:'absolute',top:4,right:4,width:22,height:22,borderRadius:'50%',background:'rgba(239,68,68,0.95)',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:800}}>×</div>
+                </div>
+              ) : (
+                <a key={'i'+i} href={reportMediaUrl(p)} target="_blank" rel="noreferrer"
+                  style={{aspectRatio:'1/1',background:T.bg3,backgroundImage:`url(${reportMediaUrl(p)})`,backgroundSize:'cover',backgroundPosition:'center',borderRadius:9,border:`1px solid ${T.border}`,display:'block'}}/>
+              )
+            ))}
+          </div>
+        </>)}
+
+        {auds.length > 0 && (<>
+          <SecH>Audio · {auds.length}</SecH>
+          {auds.map((p,i)=>(
+            <div key={'a'+i} style={{...cardS,display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:20,flexShrink:0}}>🔊</span>
+              <audio src={reportMediaUrl(p)} controls style={{flex:1,height:34}} onError={e=>{e.target.style.display='none';}}/>
+            </div>
+          ))}
+        </>)}
+
+        {mediaCount === 0 && !editing && (
+          <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12,padding:'24px 18px'}}>No media attached to this report.</div>
+        )}
+
+        <SecH>Actions</SecH>
+        {editing ? (
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+            <button onClick={save} disabled={saving} style={{flex:1,minWidth:140,fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:10,padding:'12px',cursor:saving?'wait':'pointer',opacity:saving?0.7:1}}>{saving?'Saving…':'💾 Save changes'}</button>
+            <button onClick={cancelEdit} disabled={saving} style={{flex:1,minWidth:120,fontSize:13,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'12px',cursor:'pointer'}}>Cancel</button>
+          </div>
+        ) : (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+            {st === 'approved' ? (
+              <button onClick={()=>revertApproval(live.id)} style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#F59E0B,#B45309)',border:'none',borderRadius:10,padding:'12px',cursor:'pointer'}}>↩ Revert approval</button>
+            ) : (
+              <button onClick={()=>approveReport(live.id)} style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:10,padding:'12px',cursor:'pointer'}}>✅ Approve</button>
+            )}
+            {st !== 'rejected' ? (
+              <button onClick={()=>rejectReport(live.id)} style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:10,padding:'12px',cursor:'pointer'}}>❌ Reject</button>
+            ) : (
+              <button onClick={startEdit} style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#3B82F6,#1D4ED8)',border:'none',borderRadius:10,padding:'12px',cursor:'pointer'}}>✏️ Modify</button>
+            )}
+            {st !== 'rejected' && (
+              <button onClick={startEdit} style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#3B82F6,#1D4ED8)',border:'none',borderRadius:10,padding:'12px',cursor:'pointer'}}>✏️ Modify</button>
+            )}
+            <button onClick={()=>{ deleteReport(live.id); close(); }} style={{fontSize:13,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'12px',cursor:'pointer',gridColumn:'span 2'}}>🗑 Delete</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DrillScreen() {
     const f = drill[drill.length-1];
     if (f.type==='metric')        return <MetricView metric={f.metric}/>;
@@ -1113,6 +1399,7 @@ function AdminDashboardScreen({ onBack }) {
     if (f.type==='video')         return <VideoView video={f.video}/>;
     if (f.type==='pending')       return <PendingTable/>;
     if (f.type==='pendingreview') return <PendingReviewDetail item={f.item}/>;
+    if (f.type==='reportreview')  return <ReportReview report={f.report}/>;
     if (f.type==='formslist')     return <FormsList category={f.category}/>;
     if (f.type==='formdetail')    return <FormDetail sub={f.sub}/>;
     return null;
@@ -1126,6 +1413,7 @@ function AdminDashboardScreen({ onBack }) {
     if (f.type==='video')         return 'Video Review';
     if (f.type==='pending')       return 'Pending Reviews';
     if (f.type==='pendingreview') return 'Review · ' + f.item.id;
+    if (f.type==='reportreview')  return 'Report · ' + reportReporter(f.report);
     if (f.type==='formslist')     return (FORM_CATS.find(c=>c.key===f.category)||{}).label || 'Form submissions';
     if (f.type==='formdetail')    return 'Submission · ' + f.sub.id;
     return '';
@@ -1187,46 +1475,161 @@ function AdminDashboardScreen({ onBack }) {
     if (m && m.need && !can(m.need)) return <Locked need={m.need} />;
 
     if (view === 'moderation') {
-      const _mediaHost = API_BASE.replace(/\/api\/?$/, '');
-      const _mediaUrl = (p) => !p ? '' : (/^https?:\/\//i.test(p) ? p : `${_mediaHost}/${String(p).replace(/^\//, '')}`);
-      const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }); };
+      // Status filter pills built from the statuses actually present (reports carry `status`, not a category).
+      const statusesPresent = Array.from(new Set(reports.map(r => String(r.status || 'new').toLowerCase())));
+      const pills = ['all', ...statusesPresent];
+      const pillLabel = (s) => s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1);
+      // Distinct locations among loaded reports (for the location dropdown).
+      const locOptions = Array.from(new Set(reports.map(r => reportLoc(r)).filter(Boolean))).sort();
+      const localDate = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+      const q = reportSearch.trim().toLowerCase();
+      const visible = reports.filter(r => {
+        if (reportFilter !== 'all' && String(r.status || 'new').toLowerCase() !== reportFilter) return false;
+        if (reportLocFilter !== 'all' && reportLoc(r) !== reportLocFilter) return false;
+        if (reportDate && localDate(r.created_at) !== reportDate) return false;
+        if (q && ![reportReporter(r), r.email, r.subject, r.message, reportLoc(r)]
+          .some(f => f != null && String(f).toLowerCase().includes(q))) return false;
+        return true;
+      });
+      const hasReportFilters = reportFilter !== 'all' || reportLocFilter !== 'all' || !!reportDate || !!q;
+      const clearReportFilters = () => { setReportFilter('all'); setReportLocFilter('all'); setReportDate(''); setReportSearch(''); };
+      const palette = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#D0021B','#0EA5E9'];
       return (
         <div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
             <SecH>Reports {reports.length ? `· ${reports.length}` : ''}</SecH>
             <button onClick={loadReports} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
           </div>
+
+          {/* Status filter pills */}
+          {reports.length > 0 && (
+            <div style={{display:'flex',gap:6,overflowX:'auto',paddingBottom:4,marginBottom:10}}>
+              {pills.map(s => {
+                const cnt = s === 'all' ? reports.length : reports.filter(r => String(r.status||'new').toLowerCase() === s).length;
+                const active = reportFilter === s;
+                const c = s === 'all' ? '#D0021B' : reportStatusColor(s);
+                return (
+                  <button key={s} onClick={()=>setReportFilter(s)} style={{flexShrink:0,fontSize:11,fontWeight:700,cursor:'pointer',
+                    color:active?'#fff':T.textMuted, background:active?c:T.bg3,
+                    border:`1px solid ${active?c:T.border}`, borderRadius:20, padding:'6px 12px'}}>
+                    {pillLabel(s)}{s!=='all'?` · ${cnt}`:''}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Search · Location · Date filters */}
+          {reports.length > 0 && (
+            <div style={{...cardS,display:'flex',flexDirection:'column',gap:8}}>
+              <div style={{position:'relative'}}>
+                <span style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',fontSize:13,color:T.textMuted,pointerEvents:'none'}}>🔍</span>
+                <input type="text" value={reportSearch} onChange={e=>setReportSearch(e.target.value)}
+                  placeholder="Search by name, subject, email…"
+                  style={{width:'100%',boxSizing:'border-box',background:T.bg3,border:`1px solid ${T.border}`,borderRadius:9,padding:'9px 32px 9px 32px',color:T.text,fontSize:12.5,outline:'none'}}/>
+                {reportSearch && (
+                  <button onClick={()=>setReportSearch('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:T.textMuted,fontSize:14,cursor:'pointer',lineHeight:1,padding:2}}>✕</button>
+                )}
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:140}}>
+                  <div style={{fontSize:10,fontWeight:800,color:T.textMuted,textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📍 Location</div>
+                  <select value={reportLocFilter} onChange={e=>setReportLocFilter(e.target.value)}
+                    style={{width:'100%',boxSizing:'border-box',background:T.bg3,color:T.text,border:`1px solid ${T.border}`,borderRadius:9,padding:'8px 9px',fontSize:12.5,outline:'none'}}>
+                    <option value="all">All locations</option>
+                    {locOptions.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+                <div style={{flex:1,minWidth:140}}>
+                  <div style={{fontSize:10,fontWeight:800,color:T.textMuted,textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📅 Date</div>
+                  <input type="date" value={reportDate} onChange={e=>setReportDate(e.target.value)}
+                    style={{width:'100%',boxSizing:'border-box',background:T.bg3,color:T.text,border:`1px solid ${T.border}`,borderRadius:9,padding:'7px 9px',fontSize:12.5,outline:'none'}}/>
+                </div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <span style={{fontSize:11,color:T.textMuted}}>Showing <b style={{color:T.text}}>{visible.length}</b> of {reports.length} loaded</span>
+                {hasReportFilters && (
+                  <button onClick={clearReportFilters} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 11px',cursor:'pointer'}}>✕ Clear filters</button>
+                )}
+              </div>
+            </div>
+          )}
+
           {reportsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{reportsErr}</div>}
           {reportsLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading reports…</div>}
           {!reportsLoading && !reportsErr && reports.length === 0 && (
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No reports found.</div>
           )}
-          {reports.map((r,i) => {
-            const vids = [].concat(r.video_path || r.video_paths || []).filter(Boolean);
-            const imgs = [].concat(r.image_path || r.image_paths || []).filter(Boolean);
-            const auds = [].concat(r.audio_path || r.audio_paths || []).filter(Boolean);
+          {!reportsLoading && reports.length > 0 && visible.length === 0 && (
+            <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No reports match the current filters{reportsHasMore ? ' — scroll / Load more to fetch additional reports.' : '.'}</div>
+          )}
+
+          {visible.map((r,i) => {
+            const { imgs, vids, auds } = reportMedia(r);
+            const thumb = imgs[0] ? reportMediaUrl(imgs[0]) : null;
+            const st = String(r.status || 'new').toLowerCase();
+            const sc = reportStatusColor(st);
+            const loc = reportLoc(r);
+            const col = palette[i % palette.length];
             return (
-              <div key={r.id || i} style={{...cardS}}>
-                <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,marginBottom:5}}>
-                  {r.subject || '(no subject)'}
+              <div key={r.id || i} onClick={()=>openReport(r)}
+                style={{...cardS, cursor:'pointer', display:'flex', gap:11, alignItems:'flex-start'}}>
+                {/* Thumbnail / media-type icon */}
+                <div style={{width:54,height:54,borderRadius:9,background:T.bg3,flexShrink:0,overflow:'hidden',
+                  display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,
+                  backgroundImage:thumb?`url(${thumb})`:'none',backgroundSize:'cover',backgroundPosition:'center'}}>
+                  {!thumb && (vids.length ? '🎬' : auds.length ? '🔊' : '📄')}
                 </div>
-                <div style={{fontSize:11.5,color:T.textMuted,marginBottom:8}}>
-                  👤 {r.name || '—'}{r.email?` · ${r.email}`:''}{r.created_at?` · ${fmtDate(r.created_at)}`:''}
-                </div>
-                {(vids.length || imgs.length || auds.length) > 0 && (
-                  <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:8}}>
-                    {vids.map((p,j)=><a key={'v'+j} href={_mediaUrl(p)} target="_blank" rel="noreferrer" style={{fontSize:10.5,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.4)',borderRadius:7,padding:'4px 8px',textDecoration:'none'}}>🎬 Video {vids.length>1?j+1:''}</a>)}
-                    {imgs.map((p,j)=><a key={'i'+j} href={_mediaUrl(p)} target="_blank" rel="noreferrer" style={{fontSize:10.5,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.4)',borderRadius:7,padding:'4px 8px',textDecoration:'none'}}>🖼 Image {imgs.length>1?j+1:''}</a>)}
-                    {auds.map((p,j)=><a key={'a'+j} href={_mediaUrl(p)} target="_blank" rel="noreferrer" style={{fontSize:10.5,fontWeight:700,color:'#8B5CF6',background:'rgba(139,92,246,0.12)',border:'1px solid rgba(139,92,246,0.4)',borderRadius:7,padding:'4px 8px',textDecoration:'none'}}>🔊 Audio {auds.length>1?j+1:''}</a>)}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:4}}>
+                    <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,
+                      display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+                      {reportTitle(r)}
+                    </div>
+                    <span style={{flexShrink:0}}><Chip txt={pillLabel(st)} c={sc} /></span>
                   </div>
-                )}
-                <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
-                  <button onClick={()=>editReportSubject(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#3B82F6,#1D4ED8)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✏️ Edit subject</button>
-                  <button onClick={()=>deleteReport(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                  <div style={{fontSize:11,color:T.textMuted,marginBottom:8,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                    {loc?`📍 ${loc} · `:''}👤 {reportReporter(r)}{r.created_at?` · ${fmtAge(r.created_at)}`:''}
+                  </div>
+                  {(vids.length || imgs.length || auds.length) > 0 && (
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                      {vids.length>0 && <span style={{fontSize:10,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.35)',borderRadius:6,padding:'3px 7px'}}>🎬 {vids.length}</span>}
+                      {imgs.length>0 && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🖼 {imgs.length}</span>}
+                      {auds.length>0 && <span style={{fontSize:10,fontWeight:700,color:'#8B5CF6',background:'rgba(139,92,246,0.12)',border:'1px solid rgba(139,92,246,0.35)',borderRadius:6,padding:'3px 7px'}}>🔊 {auds.length}</span>}
+                    </div>
+                  )}
+                  <div style={{display:'flex',gap:7,flexWrap:'wrap'}} onClick={(e)=>e.stopPropagation()}>
+                    <button onClick={()=>openReport(r)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#3B82F6,#1D4ED8)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>👁 Review</button>
+                    {st === 'approved' ? (
+                      <button onClick={()=>revertApproval(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#F59E0B,#B45309)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>↩ Revert</button>
+                    ) : (
+                      <button onClick={()=>approveReport(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✅ Approve</button>
+                    )}
+                    {st !== 'rejected' && (
+                      <button onClick={()=>rejectReport(r.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>❌ Reject</button>
+                    )}
+                    <button onClick={()=>openReport(r)} style={{fontSize:11,fontWeight:800,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✏️ Modify</button>
+                    <button onClick={()=>deleteReport(r.id)} style={{fontSize:11,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                  </div>
                 </div>
               </div>
             );
           })}
+
+          {/* Infinite-scroll footer */}
+          {!reportsLoading && reports.length > 0 && (
+            <div style={{textAlign:'center',padding:'8px 0 4px'}}>
+              {reportsLoadingMore ? (
+                <div style={{fontSize:12,color:T.textMuted}}>Loading more…</div>
+              ) : reportsHasMore ? (
+                <button onClick={loadMoreReports} style={{fontSize:12,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:9,padding:'9px 18px',cursor:'pointer'}}>
+                  ↓ Load more
+                </button>
+              ) : (
+                <div style={{fontSize:11,color:T.textMuted}}>· End of reports · {reports.length} total ·</div>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -1305,22 +1708,83 @@ function AdminDashboardScreen({ onBack }) {
         ['Audit log access','All','Team','Own'],
       ];
       const palette = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#D0021B','#0EA5E9'];
+      // Canonical role display data (label + colour). Keys match DB role values.
+      const ROLE_META = {
+        user:         { label:'User',         c:'#6B7280' },
+        admin:        { label:'Admin',        c:'#3B82F6' },
+        master_admin: { label:'Master Admin', c:'#8B5CF6' },
+        super_admin:  { label:'Super Admin',  c:'#D0021B' },
+      };
+      const roleMeta = (r) => ROLE_META[String(r || 'user').toLowerCase()] || ROLE_META.user;
+      const isVerified = (u) => u.is_verified === 1 || u.is_verified === true || u.is_verified === '1';
+      const q = userSearch.trim().toLowerCase();
+      const filteredUsers = users.filter(u => {
+        if (!q) return true;
+        return [u.name, u.phone, u.email, u.role, locName(u.location)]
+          .some(f => f != null && f.toString().toLowerCase().includes(q));
+      });
+      // Unverified users float to the top, preserving original order within each group.
+      const sortedUsers = filteredUsers
+        .map((u, i) => ({ u, i }))
+        .sort((a, b) => (isVerified(a.u) === isVerified(b.u) ? a.i - b.i : isVerified(a.u) ? 1 : -1))
+        .map(x => x.u);
       return (
         <div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
             <SecH>Users {users.length ? `· ${users.length}` : ''}</SecH>
             <button onClick={loadUsers} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
           </div>
+          <div style={{position:'relative',marginBottom:10}}>
+            <span style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',fontSize:13,color:T.textMuted,pointerEvents:'none'}}>🔍</span>
+            <input
+              type="text"
+              value={userSearch}
+              onChange={(e)=>setUserSearch(e.target.value)}
+              placeholder="Search by name, phone, email, role…"
+              style={{width:'100%',boxSizing:'border-box',background:T.bg3,border:`1px solid ${T.border}`,borderRadius:9,
+                padding:'9px 32px 9px 32px',color:T.text,fontSize:12.5,outline:'none'}}
+            />
+            {userSearch && (
+              <button onClick={()=>setUserSearch('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',
+                background:'none',border:'none',color:T.textMuted,fontSize:14,cursor:'pointer',lineHeight:1,padding:2}}>✕</button>
+            )}
+          </div>
+          {promoteRole && (
+            <div style={{...cardS,background:`${roleMeta(promoteRole).c}14`,borderColor:`${roleMeta(promoteRole).c}66`,display:'flex',alignItems:'center',gap:10}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,fontWeight:800,color:roleMeta(promoteRole).c,letterSpacing:0.5,marginBottom:2}}>SELECT A USER</div>
+                <div style={{fontSize:12.5,color:T.text,lineHeight:1.5}}>Tap any user below to make them <b style={{color:roleMeta(promoteRole).c}}>{roleMeta(promoteRole).label}</b>.</div>
+              </div>
+              <button onClick={()=>setPromoteRole(null)} style={{fontSize:11,fontWeight:800,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:'pointer',flexShrink:0}}>Cancel</button>
+            </div>
+          )}
           {usersErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{usersErr}</div>}
           {usersLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading users…</div>}
           {!usersLoading && !usersErr && users.length === 0 && (
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No users found.</div>
           )}
-          {users.map((u,i) => {
-            const verified = u.is_verified === 1 || u.is_verified === true || u.is_verified === '1';
+          {!usersLoading && !usersErr && users.length > 0 && sortedUsers.length === 0 && (
+            <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No users match “{userSearch}”.</div>
+          )}
+          <div style={{maxHeight:520,overflowY:'auto',marginRight:-4,paddingRight:4}}>
+          {sortedUsers.map((u,i) => {
+            const verified = isVerified(u);
+            const rm = roleMeta(u.role);
+            const selecting = !!promoteRole;
+            const pickUser = () => {
+              if (!selecting) return;
+              const tgt = roleMeta(promoteRole);
+              if ((u.role||'user') === promoteRole) { alert(`${u.name||'This user'} is already ${tgt.label}.`); return; }
+              if (!window.confirm(`Make ${u.name||'this user'} a ${tgt.label}?`)) return;
+              changeUserRole(u.id, promoteRole);
+              setPromoteRole(null);
+            };
             return (
-              <div key={u.id || i} style={{...cardS}}>
-                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+              <div key={u.id || i} onClick={pickUser} style={{...cardS,
+                cursor: selecting ? 'pointer' : 'default',
+                borderColor: selecting ? `${roleMeta(promoteRole).c}66` : T.border,
+                boxShadow: selecting ? `0 0 0 1px ${roleMeta(promoteRole).c}33 inset` : 'none'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:selecting?0:8}}>
                   <div style={{width:36,height:36,borderRadius:'50%',background:palette[i%palette.length],color:'#fff',
                     display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:15,flexShrink:0}}>
                     {(u.name||u.phone||'?').toString().charAt(0).toUpperCase()}
@@ -1328,30 +1792,47 @@ function AdminDashboardScreen({ onBack }) {
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:700,fontSize:13.5,color:T.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{u.name||'—'}</div>
                     <div style={{fontSize:11,color:T.textMuted,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                      {u.phone||u.email||'—'} · {u.role||'user'}{u.location?` · 📍 ${locName(u.location)}`:''}
+                      {u.phone||u.email||'—'}{u.location?` · 📍 ${locName(u.location)}`:''}
                     </div>
                   </div>
-                  <Chip txt={verified?'Verified':'Unverified'} c={verified?'#10B981':'#F59E0B'} />
+                  <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end',flexShrink:0}}>
+                    <Chip txt={rm.label} c={rm.c} />
+                    <Chip txt={verified?'Verified':'Unverified'} c={verified?'#10B981':'#F59E0B'} />
+                  </div>
                 </div>
-                <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
-                  {!verified && (
-                    <button onClick={()=>verifyUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✅ Verify</button>
-                  )}
-                  <button onClick={()=>rejectUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#F59E0B,#B45309)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✋ Reject</button>
-                  <button onClick={()=>deleteUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
-                </div>
+                {!selecting && (
+                  <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                    {!verified && (
+                      <button onClick={()=>verifyUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✅ Verify</button>
+                    )}
+                    <button onClick={()=>rejectUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#F59E0B,#B45309)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>✋ Reject</button>
+                    <button onClick={()=>deleteUser(u.id)} style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                    {(u.role||'user') !== 'user' && (
+                      <button onClick={()=>{ if(window.confirm(`Demote ${u.name||'this user'} to User?`)) changeUserRole(u.id,'user'); }} style={{fontSize:11,fontWeight:800,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>⬇ Demote to User</button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
+          </div>
           <div style={{display:'flex',gap:8,marginTop:4,marginBottom:6}}>
-            <span style={{flex:1,textAlign:'center',fontSize:11.5,fontWeight:700,
-              color:can('createMaster')?'#fff':T.textMuted,background:can('createMaster')?'#8B5CF6':T.bg3,
-              border:`1px solid ${T.border}`,borderRadius:9,padding:'9px 6px'}}>
-              {can('createMaster')?'＋ Master Admin':'🔒 Master Admin'}</span>
-            <span style={{flex:1,textAlign:'center',fontSize:11.5,fontWeight:700,
-              color:can('createAdmin')?'#fff':T.textMuted,background:can('createAdmin')?'#3B82F6':T.bg3,
-              border:`1px solid ${T.border}`,borderRadius:9,padding:'9px 6px'}}>
-              {can('createAdmin')?'＋ Admin':'🔒 Admin'}</span>
+            <button
+              disabled={!can('createMaster')}
+              onClick={()=>setPromoteRole(p => p==='master_admin' ? null : 'master_admin')}
+              style={{flex:1,textAlign:'center',fontSize:11.5,fontWeight:700,cursor:can('createMaster')?'pointer':'not-allowed',
+                color:can('createMaster')?'#fff':T.textMuted,
+                background:promoteRole==='master_admin' ? '#6D28D9' : (can('createMaster')?'#8B5CF6':T.bg3),
+                border:`1px solid ${promoteRole==='master_admin'?'#6D28D9':T.border}`,borderRadius:9,padding:'9px 6px'}}>
+              {can('createMaster')?(promoteRole==='master_admin'?'✕ Cancel':'＋ Master Admin'):'🔒 Master Admin'}</button>
+            <button
+              disabled={!can('createAdmin')}
+              onClick={()=>setPromoteRole(p => p==='admin' ? null : 'admin')}
+              style={{flex:1,textAlign:'center',fontSize:11.5,fontWeight:700,cursor:can('createAdmin')?'pointer':'not-allowed',
+                color:can('createAdmin')?'#fff':T.textMuted,
+                background:promoteRole==='admin' ? '#1D4ED8' : (can('createAdmin')?'#3B82F6':T.bg3),
+                border:`1px solid ${promoteRole==='admin'?'#1D4ED8':T.border}`,borderRadius:9,padding:'9px 6px'}}>
+              {can('createAdmin')?(promoteRole==='admin'?'✕ Cancel':'＋ Admin'):'🔒 Admin'}</button>
           </div>
           <SecH>Permissions matrix (Plan v1.3 §3.2)</SecH>
           <div style={{...cardS,padding:0,overflow:'hidden'}}>
@@ -1659,16 +2140,13 @@ function AdminDashboardScreen({ onBack }) {
   // ══ HOME GRID ══════════════════════════════════════════════════════
   const Home = (
     <div>
-      {/* Role switcher */}
-      <div style={{display:'flex',gap:6,marginBottom:12,background:T.bg2,border:`1px solid ${T.border}`,borderRadius:12,padding:5}}>
-        {Object.keys(ROLES).map(k => (
-          <button key={k} onClick={()=>setRole(k)} style={{
-            flex:1, border:'none', cursor:'pointer', borderRadius:9, padding:'9px 4px',
-            fontFamily:"'Barlow',sans-serif", fontWeight:800, fontSize:12,
-            background: role===k ? 'linear-gradient(135deg,#E8001E,#D0021B)' : 'transparent',
-            color: role===k ? '#fff' : T.textMuted, transition:'all 0.2s',
-          }}>{ROLES[k].label}</button>
-        ))}
+      {/* Role badge — only the logged-in user's own tier is shown (no switching). */}
+      <div style={{display:'flex',marginBottom:12,background:T.bg2,border:`1px solid ${T.border}`,borderRadius:12,padding:5}}>
+        <div style={{
+          flex:1, textAlign:'center', borderRadius:9, padding:'9px 4px',
+          fontFamily:"'Barlow',sans-serif", fontWeight:800, fontSize:12,
+          background:'linear-gradient(135deg,#E8001E,#D0021B)', color:'#fff',
+        }}>{R.label}</div>
       </div>
       <div style={{...cardS,background:'rgba(208,2,27,0.08)',borderColor:'rgba(208,2,27,0.3)',marginBottom:14}}>
         <div style={{fontSize:12.5,color:T.text,fontWeight:700}}>{R.scope}</div>
@@ -1721,7 +2199,7 @@ function AdminDashboardScreen({ onBack }) {
         })}
       </div>
       <div style={{textAlign:'center',fontSize:11,color:T.textMuted,margin:'16px 0 4px',lineHeight:1.6}}>
-        Demo / mockup — reflects Plan v1.3.<br/>Switch role above to see what each tier sees.
+        Signed in as <b style={{color:T.text}}>{R.label}</b>.
       </div>
     </div>
   );
@@ -1746,8 +2224,14 @@ function AdminDashboardScreen({ onBack }) {
           <div style={{fontSize:11,color:'rgba(255,255,255,0.8)'}}>🛡️ {R.label}{(view==='home'&&!drill.length)?' · demo':''}</div>
         </div>
       </div>
-      <div style={{flex:1,overflowY:'auto',padding:'14px 14px 40px'}}>
-        {drill.length ? <DrillScreen/> : (view === 'home' ? Home : <ModuleBody/>)}
+      <div
+        onScroll={(e)=>{
+          if (view !== 'moderation' || drill.length) return;
+          const el = e.currentTarget;
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) loadMoreReports();
+        }}
+        style={{flex:1,overflowY:'auto',padding:'14px 14px 40px'}}>
+        {drill.length ? <DrillScreen/> : (view === 'home' ? Home : ModuleBody())}
       </div>
     </div>
   );

@@ -22,7 +22,7 @@ function resolveProfilePictureUrl(raw) {
 
 function ProfileScreen({ onNavigate }) {
   const { T } = useAppTheme();
-  const { user, token, refreshUser, logout, patchUser, isVerified } = useAuth();
+  const { user, token, refreshUser, logout, patchUser, setSession, isVerified } = useAuth();
 
   // Admin Dashboard is shown only to admin-tier users (admin / master_admin /
   // superadmin). Regular 'user' role never sees it.
@@ -72,13 +72,41 @@ function ProfileScreen({ onNavigate }) {
         });
         if (!res.ok) return;
         const data = await res.json().catch(() => null);
-        if (!stopped && data) {
-          patchUser({
-            ...(data.role ? { role: data.role } : {}),
-            ...('is_verified' in data ? { is_verified: data.is_verified } : {}),
-            ...('verified' in data ? { verified: data.verified } : {}),
-          });
+        if (stopped || !data) return;
+
+        // Compare against the currently-stored role BEFORE patching.
+        const cached = (getCachedUserVerification() && getCachedUserVerification().user) || {};
+        const roleChanged = data.role && cached.role && data.role !== cached.role;
+
+        if (roleChanged && cached.phone) {
+          // Role changed → the JWT is now stale (role is baked into it). Re-issue
+          // a fresh token for the new role via auth-by-phone and swap the session.
+          try {
+            const r = await fetch(`${API_BASE}/auth/auth-by-phone`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify({ phone: cached.phone }),
+              credentials: 'include',
+            });
+            if (r.ok) {
+              const d = await r.json().catch(() => null);
+              if (!stopped && d && d.token) {
+                setSession({
+                  token: d.token,
+                  user: d.user || { ...cached, role: data.role, is_verified: data.is_verified, verified: data.verified },
+                });
+                return; // session refreshed with the new-role token
+              }
+            }
+          } catch (e) { /* fall through to a plain patch */ }
         }
+
+        // No role change (or re-auth unavailable) → just refresh role + verification.
+        patchUser({
+          ...(data.role ? { role: data.role } : {}),
+          ...('is_verified' in data ? { is_verified: data.is_verified } : {}),
+          ...('verified' in data ? { verified: data.verified } : {}),
+        });
       } catch (e) { /* ignore transient errors */ }
       finally { inFlight = false; }
     };
