@@ -499,25 +499,50 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         <div style={{position:'absolute',top:148,right:12,left:12,zIndex:100,
           background:T.bg2,borderRadius:16,border:`1px solid ${T.border}`,
           boxShadow:`0 8px 32px rgba(0,0,0,0.25)`,overflow:'hidden'}}>
-          {/* Header */}
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-            padding:'12px 16px',borderBottom:`1px solid ${T.border}`,
+          {/* Header — action controls are real <button>s with comfortable
+              tap targets so they work reliably on touch screens. */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,
+            padding:'10px 12px',borderBottom:`1px solid ${T.border}`,
             background:T.isDark?'rgba(208,2,27,0.08)':'rgba(208,2,27,0.04)'}}>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.text}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.text,
+              flexShrink:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
               🔔 Notifications
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:12}}>
-              <span
-                onClick={()=>{ if(unreadCount>0) markAllRead(); }}
-                style={{fontSize:10,fontWeight:600,
-                  color:unreadCount>0?T.textMuted:`${T.textMuted}66`,
-                  cursor:unreadCount>0?'pointer':'default'}}>Mark all read</span>
-              <span
-                onClick={()=>{ if(notifications.length) clearAll(); }}
-                style={{fontSize:10,fontWeight:600,
+            <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+              <button
+                type="button"
+                disabled={unreadCount===0}
+                onClick={(e)=>{ e.stopPropagation(); markAllRead(); }}
+                style={{
+                  fontFamily:"'Barlow',sans-serif",fontSize:11,fontWeight:700,lineHeight:1,
+                  padding:'8px 10px',minHeight:34,borderRadius:8,whiteSpace:'nowrap',flexShrink:0,
+                  border:`1px solid ${unreadCount>0?'rgba(43,127,255,0.45)':T.border}`,
+                  background:unreadCount>0?'rgba(43,127,255,0.12)':'transparent',
+                  color:unreadCount>0?'#2B7FFF':`${T.textMuted}66`,
+                  cursor:unreadCount>0?'pointer':'default',
+                  WebkitTapHighlightColor:'transparent',touchAction:'manipulation',
+                }}>Mark all read</button>
+              <button
+                type="button"
+                disabled={notifications.length===0}
+                onClick={(e)=>{ e.stopPropagation(); clearAll(); }}
+                style={{
+                  fontFamily:"'Barlow',sans-serif",fontSize:11,fontWeight:700,lineHeight:1,
+                  padding:'8px 10px',minHeight:34,borderRadius:8,whiteSpace:'nowrap',flexShrink:0,
+                  border:`1px solid ${notifications.length?'rgba(208,2,27,0.45)':T.border}`,
+                  background:notifications.length?'rgba(208,2,27,0.12)':'transparent',
                   color:notifications.length?T.red:`${T.red}66`,
-                  cursor:notifications.length?'pointer':'default'}}>Clear all</span>
-              <button onClick={()=>setShowNotifs(false)} style={{background:'none',border:'none',fontSize:18,color:T.textMuted,cursor:'pointer',lineHeight:1}}>×</button>
+                  cursor:notifications.length?'pointer':'default',
+                  WebkitTapHighlightColor:'transparent',touchAction:'manipulation',
+                }}>Clear all</button>
+              <button
+                type="button"
+                onClick={(e)=>{ e.stopPropagation(); setShowNotifs(false); }}
+                aria-label="Close notifications"
+                style={{background:'none',border:'none',fontSize:20,color:T.textMuted,
+                  cursor:'pointer',lineHeight:1,width:34,height:34,flexShrink:0,
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  WebkitTapHighlightColor:'transparent',touchAction:'manipulation'}}>×</button>
             </div>
           </div>
           {/* Notif list */}

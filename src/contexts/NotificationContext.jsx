@@ -8,6 +8,7 @@ import { useAuth } from './AuthContext.jsx';
 // survives reloads.
 const STORAGE_KEY_NOTIFS  = 'localaitv.notifications';
 const STORAGE_KEY_VERIFY  = 'localaitv.notif.verifyState'; // { userId, verified }
+const STORAGE_KEY_ROLE    = 'localaitv.notif.roleState';   // { userId, role }
 
 function readJSON(key, fallback) {
   try {
@@ -57,6 +58,55 @@ function makeVerifyNotif(verified) {
       };
 }
 
+// Normalize the many backend role spellings to a single key:
+// "Super Admin" / "super-admin" → "super_admin", etc.
+function normalizeRole(raw) {
+  return String(raw == null ? '' : raw).toLowerCase().trim().replace(/[\s-]+/g, '_');
+}
+
+// Admin-tier roles (anything above a plain "user"). Used to pick the tap target.
+const ADMIN_ROLE_KEYS = new Set([
+  'admin', 'master', 'master_admin', 'super', 'superadmin', 'super_admin', 'moderator',
+]);
+function isAdminRole(roleKey) {
+  return ADMIN_ROLE_KEYS.has(roleKey);
+}
+
+// Friendly label for a normalized role key.
+function roleLabel(roleKey) {
+  switch (roleKey) {
+    case 'super':
+    case 'superadmin':
+    case 'super_admin':  return 'Super Admin';
+    case 'master':
+    case 'master_admin': return 'Master Admin';
+    case 'admin':        return 'Admin';
+    case 'moderator':    return 'Moderator';
+    case 'user':
+    case '':             return 'User';
+    default:
+      // Title-case any unexpected value so it still reads cleanly.
+      return roleKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+}
+
+// Build the role notification payload for a normalized role key.
+function makeRoleNotif(roleKey) {
+  const admin = isAdminRole(roleKey);
+  const icon = roleKey === 'super' || roleKey === 'superadmin' || roleKey === 'super_admin'
+    ? '👑'
+    : admin ? '🛡️' : '👤';
+  return {
+    type: 'role',
+    icon,
+    title: `Your role: ${roleLabel(roleKey)}`,
+    sub: admin
+      ? 'You have admin access — tap to open the admin dashboard.'
+      : "You're signed in as a regular user.",
+    nav: admin ? 'admindashboard' : 'profile',
+  };
+}
+
 const NotificationContext = createContext(null);
 
 export function NotificationProvider({ children }) {
@@ -97,6 +147,21 @@ export function NotificationProvider({ children }) {
       writeJSON(STORAGE_KEY_VERIFY, { userId, verified: current });
     }
   }, [userId, isVerified, addNotification]);
+
+  // ── Role → notification bridge ───────────────────────────────
+  // Fire once when the role is first known (from GET /users/:id/role) and again
+  // whenever it changes. We only act once `user.role` is an actual value so an
+  // admin doesn't briefly get a "User" notification before the role resolves.
+  const rawRole = user && user.role;
+  useEffect(() => {
+    if (!userId || !rawRole) return;
+    const roleKey = normalizeRole(rawRole);
+    const rec = readJSON(STORAGE_KEY_ROLE, null);
+    if (!rec || rec.userId !== userId || rec.role !== roleKey) {
+      addNotification(makeRoleNotif(roleKey));
+      writeJSON(STORAGE_KEY_ROLE, { userId, role: roleKey });
+    }
+  }, [userId, rawRole, addNotification]);
 
   const unreadCount = useMemo(
     () => notifications.reduce((n, x) => n + (x.unread ? 1 : 0), 0),

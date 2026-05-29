@@ -4,6 +4,7 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 import KurnoolShortItem from './../components/Feed/KurnoolShortItem.jsx';
 import ShortsShareSheet from './../components/Feed/ShortsShareSheet.jsx';
 import { sortShortsForFeed, getLoopIdx } from './../components/Feed/UnifiedFeedViewer.jsx';
+import SnapShortsScroller from './../components/Feed/SnapShortsScroller.jsx';
 
 function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
   const { T }   = useAppTheme();
@@ -11,18 +12,11 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
   const sorted  = useMemo(() => sortShortsForFeed(rawItems || SHORT_NEWS), [rawItems]);
   const total   = sorted.length;
 
-  const [rawIdx,    setRawIdx]    = useState(initialIdx);
-  const [animDir,   setAnimDir]   = useState(null); // 'up' | 'down'
+  const [curIdx,    setCurIdx]    = useState(initialIdx); // live looped index (share target)
   const [showShare, setShowShare] = useState(false);
 
-  // Actual index with loop wrapping
-  const idx = getLoopIdx(rawIdx, total);
+  const idx = total > 0 ? getLoopIdx(curIdx, total) : 0;
   const cur = sorted[idx];
-
-  const touchY  = useRef(0);
-  const touchX  = useRef(0);
-  const moved   = useRef(false);
-  const animating = useRef(false);
 
   // Lock body scroll
   useEffect(() => {
@@ -30,79 +24,12 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
     return () => { document.body.style.overflow = ''; };
   }, []);
 
-  // Keyboard nav
+  // Escape closes (↑/↓ navigation handled by SnapShortsScroller).
   useEffect(() => {
-    const h = e => {
-      if (e.key === 'ArrowUp')   goNext();
-      if (e.key === 'ArrowDown') goPrev();
-      if (e.key === 'Escape')    onClose();
-    };
+    const h = e => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [rawIdx]);
-
-  const goNext = () => {
-    if (animating.current) return;
-    animating.current = true;
-    setAnimDir('up');
-    setTimeout(() => {
-      setRawIdx(i => i + 1); // always increments, loops via getLoopIdx
-      setAnimDir(null);
-      animating.current = false;
-    }, 270);
-  };
-
-  const goPrev = () => {
-    if (animating.current) return;
-    animating.current = true;
-    setAnimDir('down');
-    setTimeout(() => {
-      // Decrement freely — getLoopIdx wraps negatives so the feed
-      // loops 360° in BOTH directions (newest → oldest → newest …).
-      setRawIdx(i => i - 1);
-      setAnimDir(null);
-      animating.current = false;
-    }, 270);
-  };
-
-  const onTouchStart = e => {
-    touchY.current = e.touches[0].clientY;
-    touchX.current = e.touches[0].clientX;
-    moved.current  = false;
-  };
-  const onTouchMove = e => { moved.current = true; };
-  const onTouchEnd  = e => {
-    if (!moved.current) return;
-    const dy = touchY.current - e.changedTouches[0].clientY;
-    const dx = Math.abs(e.changedTouches[0].clientX - touchX.current);
-    if (dx > Math.abs(dy) * 0.8) return; // horizontal — ignore
-    if (dy > 55)  goNext();
-    if (dy < -55) goPrev();
-  };
-
-  // Mouse-wheel scroll → navigate (so desktop users get the same continuous
-  // up/next, down/prev behaviour as touch users).
-  // Throttled via `wheelLock` so a single trackpad flick only advances one short.
-  const wheelLock = useRef(false);
-  const onWheel = e => {
-    if (wheelLock.current || animating.current) return;
-    if (Math.abs(e.deltaY) < 18) return; // small noise → ignore
-    wheelLock.current = true;
-    if (e.deltaY > 0) goNext();
-    else              goPrev();
-    setTimeout(() => { wheelLock.current = false; }, 450);
-  };
-
-  // Date group label (Today / Yesterday / DD MMM)
-  const getDateLabel = (item) => {
-    if (!item.uploadedAt) return item.uploadDate || '';
-    const d    = new Date(item.uploadedAt);
-    const now  = new Date();
-    const diff = Math.floor((now - d) / 86400000);
-    if (diff === 0) return 'నేడు (Today)';
-    if (diff === 1) return 'నిన్న (Yesterday)';
-    return d.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
-  };
+  }, [onClose]);
 
   // Empty-state guard — when the feed has no items, render a bilingual
   // placeholder instead of mounting <KurnoolShortItem item={undefined}/>,
@@ -151,31 +78,26 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
           display:'flex', alignItems:'center', justifyContent:'center',
           pointerEvents:'all' }}>←</button>
 
-      {/* ── SWIPE + WHEEL CONTAINER ──
-            Touch swipe and mouse wheel both navigate continuously between Shorts. */}
-      <div
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onWheel={onWheel}
-        style={{ flex:1, position:'relative', overflow:'hidden', paddingTop:0 }}>
-        <div
-          key={`short-${idx}`}
-          style={{
-            position:'absolute', inset:0, paddingTop:0,
-            animation: animDir === 'up'
-              ? 'slideOutUp 0.27s cubic-bezier(0.4,0,0.2,1) forwards'
-              : animDir === 'down'
-              ? 'slideOutDown 0.27s cubic-bezier(0.4,0,0.2,1) forwards'
-              : 'slideInUp 0.29s cubic-bezier(0.4,0,0.2,1) both',
-          }}>
-          <KurnoolShortItem
-            item={cur}
-            isActive={!animDir}
-            onShare={() => setShowShare(true)}
-            onBell={() => {}}
-          />
-        </div>
+      {/* ── NATIVE SCROLL-SNAP SHORTS FEED ──
+            One swipe = one short, smooth momentum scrolling, infinite loop. */}
+      <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
+        <SnapShortsScroller
+          total={total}
+          initialIdx={initialIdx}
+          onIndexChange={setCurIdx}
+          renderItem={(itemIndex, isActive) => {
+            const item = sorted[itemIndex];
+            if (!item) return null;
+            return (
+              <KurnoolShortItem
+                item={item}
+                isActive={isActive}
+                onShare={() => setShowShare(true)}
+                onBell={() => {}}
+              />
+            );
+          }}
+        />
       </div>
 
       {/* Share sheet */}

@@ -4,22 +4,23 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 import ClassifiedFeedItem from './../components/Feed/ClassifiedFeedItem.jsx';
 import ClassifiedShareSheet from './../components/Feed/ClassifiedShareSheet.jsx';
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
+import SnapShortsScroller from './../components/Feed/SnapShortsScroller.jsx';
 
 function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', constituency = 'Kurnool' }) {
   const { T }    = useAppTheme();
   const [activeCat,   setActiveCat]   = useState(startCat);
-  const [idx,         setIdx]         = useState(startIdx);
-  const [animDir,     setAnimDir]     = useState(null);
+  const [curIdx,      setCurIdx]      = useState(startIdx); // live looped index (for share/comment target)
   const [showShare,   setShowShare]   = useState(false);
   const [showComment, setShowComment] = useState(false);
-  const touchY  = useRef(0);
-  const touchX  = useRef(0);
-  const moved   = useRef(false);
-  const animating = useRef(false);
-  // Throttle mouse-wheel events so one flick doesn't fire goNext 5×.
-  const wheelLock = useRef(false);
 
   useEffect(() => { document.body.style.overflow='hidden'; return()=>{ document.body.style.overflow=''; }; }, []);
+
+  // Escape closes the viewer (↑/↓ navigation is handled by SnapShortsScroller).
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
 
   // Live data from the backend (Who-is-Who today; more categories later).
   const { data: liveClassifieds } = useAPI(
@@ -39,51 +40,10 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
   }, [activeCat, liveClassifieds]);
 
   const total   = filtered.length;
-  // 360° infinite wrap — getLoopIdx handles negative indices, so goPrev can decrement freely.
-  const safeIdx = total > 0 ? ((idx % total) + total) % total : 0;
+  const safeIdx = total > 0 ? ((curIdx % total) + total) % total : 0;
   const cur     = filtered[safeIdx];
 
-  const handleCatChange = (cat) => { setActiveCat(cat); setIdx(0); setAnimDir(null); };
-
-  const goNext = () => {
-    if (animating.current) return;
-    animating.current = true;
-    setAnimDir('up');
-    setTimeout(() => { setIdx(i=>i+1); setAnimDir(null); animating.current=false; }, 240);
-  };
-  const goPrev = () => {
-    if (animating.current) return;
-    animating.current = true;
-    setAnimDir('down');
-    // Decrement freely; safeIdx's modulo wrap handles negatives — true infinite backward.
-    setTimeout(() => { setIdx(i=>i-1); setAnimDir(null); animating.current=false; }, 240);
-  };
-
-  const onTouchStart = e => { touchY.current=e.touches[0].clientY; touchX.current=e.touches[0].clientX; moved.current=false; };
-  const onTouchMove  = e => { moved.current=true; };
-  const onTouchEnd   = e => {
-    if(!moved.current) return;
-    const dy=touchY.current-e.changedTouches[0].clientY;
-    const dx=Math.abs(e.changedTouches[0].clientX-touchX.current);
-    if(dx>Math.abs(dy)*1.2) return;
-    if(dy>45) goNext();
-    if(dy<-45) goPrev();
-  };
-
-  // Desktop mouse-wheel — scroll wheel down = next, scroll up = previous.
-  // Wheel lock prevents one wheel event from firing 5 transitions back-to-back.
-  const onWheel = e => {
-    if (wheelLock.current || animating.current) return;
-    if (Math.abs(e.deltaY) < 8) return;
-    wheelLock.current = true;
-    if (e.deltaY > 0) goNext(); else goPrev();
-    setTimeout(() => { wheelLock.current = false; }, 320);
-  };
-
-  useEffect(() => {
-    const h=e=>{ if(e.key==='ArrowUp') goPrev(); if(e.key==='ArrowDown') goNext(); if(e.key==='Escape') onClose(); };
-    window.addEventListener('keydown',h); return()=>window.removeEventListener('keydown',h);
-  },[idx,activeCat]);
+  const handleCatChange = (cat) => { setActiveCat(cat); setCurIdx(0); };
 
   if(!cur && total===0) return (
     <div style={{position:'fixed',inset:0,zIndex:300,background:T.bg,
@@ -110,26 +70,35 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
         color:'white', fontSize:18, cursor:'pointer',
         display:'flex', alignItems:'center', justifyContent:'center',
         backdropFilter:'blur(8px)' }}>←</button>
-      {/* Feed — leaves 72px at the bottom so the ClassifiedFeedItem's action bar
-            is visible ABOVE the absolute-positioned category bar below.
-            onWheel adds desktop mouse-wheel navigation (same UX as Mana Kurnool Shorts). */}
-      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onWheel={onWheel}
-        style={{flex:1,position:'relative',overflow:'hidden'}}>
-        {cur && (
-          <div key={`${activeCat}-${safeIdx}`} style={{
-            /* explicit bottom:72 (instead of inset:0) so the action bar inside
-               stays above the bottom category strip */
-            position:'absolute', top:0, left:0, right:0, bottom:72,
-            animation:animDir==='up'?'slideOutUp 0.24s cubic-bezier(0.4,0,1,1) forwards':animDir==='down'?'slideOutDown 0.24s cubic-bezier(0.4,0,1,1) forwards':'slideInUp 0.26s cubic-bezier(0,0,0.2,1) both'}}>
-            <ClassifiedFeedItem item={cur} isActive={!animDir} onShare={()=>setShowShare(true)} onComment={()=>setShowComment(true)}/>
-          </div>
-        )}
+      {/* Feed — native scroll-snap vertical shorts (one swipe = one short, smooth
+            momentum scrolling, infinite loop). The scroller is a flex child so it
+            occupies exactly the space ABOVE the category bar; each slide is one
+            screen tall, leaving the ClassifiedFeedItem's action bar visible. */}
+      <div style={{flex:1,position:'relative',overflow:'hidden'}}>
+        <SnapShortsScroller
+          total={total}
+          initialIdx={startIdx}
+          resetKey={activeCat}
+          onIndexChange={setCurIdx}
+          renderItem={(itemIndex, isActive) => {
+            const item = filtered[itemIndex];
+            if (!item) return null;
+            return (
+              <ClassifiedFeedItem
+                item={item}
+                isActive={isActive}
+                onShare={()=>setShowShare(true)}
+                onComment={()=>setShowComment(true)}
+              />
+            );
+          }}
+        />
       </div>
       {/* Bottom category bar — single color box / panel.
           NO top border, NO gradient — one solid attractive color so the whole strip reads
           as a clean banner. Each button inside gets its OWN distinct color from `catColors`
           so the row is a vibrant rainbow that catches the eye and signals "categories to browse." */}
-      <div style={{position:'absolute',bottom:0,left:0,right:0,zIndex:25,
+      <div style={{flexShrink:0,zIndex:25,
         background: T.isDark ? '#0A2540' : '#1A237E', /* deep indigo banner — one solid color */
         boxShadow: T.isDark
           ? '0 -6px 20px rgba(0,0,0,0.55)'
