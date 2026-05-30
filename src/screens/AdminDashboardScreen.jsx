@@ -56,10 +56,26 @@ function AdminDashboardScreen({ onBack }) {
   const [reportsHasMore, setReportsHasMore] = useState(true);
   const [reportsErr, setReportsErr] = useState('');
   const [reportFilter, setReportFilter] = useState('all'); // moderation queue status filter
+  const [reportCategory, setReportCategory] = useState('all'); // content-category tab
   const [reportSearch, setReportSearch] = useState('');    // name / subject / email search
   const [reportLocFilter, setReportLocFilter] = useState('all'); // location filter
   const [reportDate, setReportDate] = useState('');        // YYYY-MM-DD date filter
   const [reportStats, setReportStats] = useState(null);    // { total, byStatus, new } for KPIs
+
+  // Classifieds — unified aiservices feed (birthday/marriage/job/vehicle/rent/…).
+  const [classifieds, setClassifieds] = useState([]);
+  const [classifiedsLoading, setClassifiedsLoading] = useState(false);
+  const [classifiedsErr, setClassifiedsErr] = useState('');
+  const [classifiedsLoaded, setClassifiedsLoaded] = useState(false);
+  const loadClassifieds = useCallback(async () => {
+    setClassifiedsLoading(true); setClassifiedsErr('');
+    try {
+      const d = await apiCall('/classifieds?limit=100');
+      setClassifieds(d.items || d.data || (Array.isArray(d) ? d : []));
+      setClassifiedsLoaded(true);
+    } catch (e) { setClassifiedsErr(e.message || 'Failed to load classifieds'); }
+    finally { setClassifiedsLoading(false); }
+  }, []);
 
   // Report counts (total + per-status) for the "Pending Review" KPI.
   const loadReportStats = useCallback(async () => {
@@ -125,9 +141,9 @@ function AdminDashboardScreen({ onBack }) {
 
   // Fetch each module's data when it opens.
   useEffect(() => {
-    if (view === 'moderation') loadReports();
+    if (view === 'moderation') { loadReports(); loadClassifieds(); }
     if (view === 'users') { loadUsers(); loadLocations(); }
-  }, [view, loadReports, loadUsers, loadLocations]);
+  }, [view, loadReports, loadClassifieds, loadUsers, loadLocations]);
 
   // Load on mount: user list (Citizens KPI) + report counts (Pending Review KPI).
   useEffect(() => { loadUsers(); loadReportStats(); }, [loadUsers, loadReportStats]);
@@ -1498,6 +1514,38 @@ function AdminDashboardScreen({ onBack }) {
       const hasReportFilters = reportFilter !== 'all' || reportLocFilter !== 'all' || !!reportDate || !!q;
       const clearReportFilters = () => { setReportFilter('all'); setReportLocFilter('all'); setReportDate(''); setReportSearch(''); };
       const palette = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#D0021B','#0EA5E9'];
+
+      // ── Content-category tabs (maps to the aiservices submission types) ──
+      const REPORT_CATS = [
+        { key:'all',         label:'All',          icon:'📋' },
+        { key:'news',        label:'News',         icon:'📰' },
+        { key:'birthday',    label:'Birthday',     icon:'🎂' },
+        { key:'anniversary', label:'Anniversary',  icon:'💑' },
+        { key:'marriage',    label:'Marriage',     icon:'💍' },
+        { key:'whoiswho',    label:'Who Is Who',   icon:'👤' },
+        { key:'events',      label:'Events',       icon:'📅' },
+        { key:'jobs',        label:'Jobs',         icon:'💼' },
+        { key:'vehicle',     label:'Vehicle',      icon:'🚗' },
+        { key:'rental',      label:'Rental',       icon:'🏠' },
+        { key:'shopping',    label:'Shopping',     icon:'🛍️' },
+        { key:'veg',         label:'Veg Prices',   icon:'🥦' },
+        { key:'talent',      label:'Talent',       icon:'🎭' },
+        { key:'voice',       label:'Public Voice', icon:'📢' },
+        { key:'guest',       label:'Guest Intake', icon:'🎬' },
+      ];
+      // Routing: News → /webhooks/reports · classifieds tabs → /api/classifieds (by type)
+      // · the rest (veg/talent/voice/guest) have no GET feed yet → placeholder.
+      const CLASSIFIEDS_CAT_TYPE = { all:null, birthday:'birthday', anniversary:'anniversary', marriage:'marriage', whoiswho:'whoiswho', events:'event', jobs:'job', vehicle:'vehicle', rental:'rent', shopping:'shopping' };
+      const isNewsCat = reportCategory === 'news';
+      const isClassifiedsCat = Object.prototype.hasOwnProperty.call(CLASSIFIEDS_CAT_TYPE, reportCategory);
+      const isPlaceholderCat = !isNewsCat && !isClassifiedsCat;
+      const activeCat = REPORT_CATS.find(c => c.key === reportCategory) || REPORT_CATS[0];
+      const classifiedsType = CLASSIFIEDS_CAT_TYPE[reportCategory] || null;
+      const visibleClassifieds = (classifiedsType
+        ? classifieds.filter(it => String(it.type || '').toLowerCase() === classifiedsType)
+        : classifieds
+      ).filter(it => !q || [it.title, it.name, it.desc, it.location, it.cat].some(f => f != null && String(f).toLowerCase().includes(q)));
+
       return (
         <div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
@@ -1505,8 +1553,36 @@ function AdminDashboardScreen({ onBack }) {
             <button onClick={loadReports} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
           </div>
 
+          {/* Category tabs */}
+          <div style={{display:'flex',gap:7,overflowX:'auto',paddingBottom:6,marginBottom:10,WebkitOverflowScrolling:'touch'}}>
+            {REPORT_CATS.map(c => {
+              const active = reportCategory === c.key;
+              return (
+                <button key={c.key} onClick={()=>setReportCategory(c.key)} style={{flexShrink:0,display:'flex',alignItems:'center',gap:5,
+                  fontSize:11.5,fontWeight:800,cursor:'pointer',whiteSpace:'nowrap',
+                  color:active?'#fff':T.text, background:active?'linear-gradient(135deg,#E8001E,#D0021B)':T.bg2,
+                  border:`1px solid ${active?'#D0021B':T.border}`, borderRadius:10, padding:'8px 12px'}}>
+                  <span style={{fontSize:14}}>{c.icon}</span>{c.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* veg / talent / voice / guest have no GET feed yet → placeholder */}
+          {isPlaceholderCat && (
+            <div style={{...cardS,textAlign:'center',padding:'40px 22px'}}>
+              <div style={{fontSize:40,marginBottom:10}}>{activeCat.icon}</div>
+              <div style={{fontFamily:"'Barlow',sans-serif",fontWeight:800,fontSize:16,color:T.text,marginBottom:6}}>{activeCat.label}</div>
+              <div style={{fontSize:12.5,color:T.textMuted,lineHeight:1.55}}>
+                🚧 {activeCat.label} doesn’t have a read API yet, so it isn’t in the queue.<br/>
+                (No GET endpoint provided for this category.)
+              </div>
+              <button onClick={()=>setReportCategory('all')} style={{marginTop:14,fontSize:11.5,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:9,padding:'8px 16px',cursor:'pointer'}}>← Back to All</button>
+            </div>
+          )}
+
           {/* Status filter pills */}
-          {reports.length > 0 && (
+          {isNewsCat &&reports.length > 0 && (
             <div style={{display:'flex',gap:6,overflowX:'auto',paddingBottom:4,marginBottom:10}}>
               {pills.map(s => {
                 const cnt = s === 'all' ? reports.length : reports.filter(r => String(r.status||'new').toLowerCase() === s).length;
@@ -1524,7 +1600,7 @@ function AdminDashboardScreen({ onBack }) {
           )}
 
           {/* Search · Location · Date filters */}
-          {reports.length > 0 && (
+          {isNewsCat &&reports.length > 0 && (
             <div style={{...cardS,display:'flex',flexDirection:'column',gap:8}}>
               <div style={{position:'relative'}}>
                 <span style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',fontSize:13,color:T.textMuted,pointerEvents:'none'}}>🔍</span>
@@ -1559,16 +1635,16 @@ function AdminDashboardScreen({ onBack }) {
             </div>
           )}
 
-          {reportsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{reportsErr}</div>}
-          {reportsLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading reports…</div>}
-          {!reportsLoading && !reportsErr && reports.length === 0 && (
+          {isNewsCat &&reportsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{reportsErr}</div>}
+          {isNewsCat &&reportsLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading reports…</div>}
+          {isNewsCat &&!reportsLoading && !reportsErr && reports.length === 0 && (
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No reports found.</div>
           )}
-          {!reportsLoading && reports.length > 0 && visible.length === 0 && (
+          {isNewsCat &&!reportsLoading && reports.length > 0 && visible.length === 0 && (
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No reports match the current filters{reportsHasMore ? ' — scroll / Load more to fetch additional reports.' : '.'}</div>
           )}
 
-          {visible.map((r,i) => {
+          {isNewsCat &&visible.map((r,i) => {
             const { imgs, vids, auds } = reportMedia(r);
             const thumb = imgs[0] ? reportMediaUrl(imgs[0]) : null;
             const st = String(r.status || 'new').toLowerCase();
@@ -1621,7 +1697,7 @@ function AdminDashboardScreen({ onBack }) {
           })}
 
           {/* Infinite-scroll footer */}
-          {!reportsLoading && reports.length > 0 && (
+          {isNewsCat &&!reportsLoading && reports.length > 0 && (
             <div style={{textAlign:'center',padding:'8px 0 4px'}}>
               {reportsLoadingMore ? (
                 <div style={{fontSize:12,color:T.textMuted}}>Loading more…</div>
@@ -1634,6 +1710,50 @@ function AdminDashboardScreen({ onBack }) {
               )}
             </div>
           )}
+
+          {/* ── Classifieds catalog (birthday / marriage / job / vehicle / …) ── */}
+          {isClassifiedsCat && (<>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+              <span style={{fontSize:11,color:T.textMuted}}>Showing <b style={{color:T.text}}>{visibleClassifieds.length}</b> {activeCat.label.toLowerCase()} item{visibleClassifieds.length!==1?'s':''}</span>
+              <button onClick={loadClassifieds} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
+            </div>
+            {classifiedsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{classifiedsErr}</div>}
+            {classifiedsLoading && !classifieds.length && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading {activeCat.label.toLowerCase()}…</div>}
+            {!classifiedsLoading && classifiedsLoaded && visibleClassifieds.length === 0 && (
+              <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No {activeCat.label.toLowerCase()} items found.</div>
+            )}
+            {visibleClassifieds.map((it,i) => {
+              const img = Array.isArray(it.images) && it.images[0] ? it.images[0] : null;
+              return (
+                <div key={it.id || i} style={{...cardS, display:'flex', gap:11, alignItems:'flex-start'}}>
+                  {img
+                    ? <a href={img} target="_blank" rel="noreferrer" style={{width:64,height:64,borderRadius:9,flexShrink:0,backgroundImage:`url(${img})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`,display:'block'}}/>
+                    : <div style={{width:64,height:64,borderRadius:9,flexShrink:0,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{activeCat.icon}</div>}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:3}}>
+                      <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,
+                        display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+                        {it.title || it.name || '(untitled)'}
+                      </div>
+                      {it.badge && <span style={{flexShrink:0}}><Chip txt={it.badge} c="#8B5CF6" /></span>}
+                    </div>
+                    {it.desc && <div style={{fontSize:11.5,color:T.textMuted,lineHeight:1.45,marginBottom:5,
+                      display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{it.desc}</div>}
+                    <div style={{fontSize:11,color:T.textMuted,display:'flex',gap:10,flexWrap:'wrap',marginBottom:6}}>
+                      {it.location && <span>📍 {it.location}</span>}
+                      {it.date && <span>📅 {it.date}</span>}
+                      {it.time && <span>🕐 {it.time}</span>}
+                      {it.phone && <span>📞 {it.phone}</span>}
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      <Chip txt={it.cat || it.type || activeCat.label} c="#3B82F6" />
+                      {Array.isArray(it.images) && it.images.length > 1 && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🖼 {it.images.length}</span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>)}
         </div>
       );
     }
