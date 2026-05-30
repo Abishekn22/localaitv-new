@@ -77,6 +77,25 @@ function AdminDashboardScreen({ onBack }) {
     finally { setClassifiedsLoading(false); }
   }, []);
 
+  // Per-category feeds (veg / talent / public-voice / guests) — lazy-loaded.
+  const FEED_ENDPOINT = { veg: '/feed/vegetables', talent: '/feed/talent', voice: '/feed/public-voice', guest: '/feed/guests' };
+  const [feedData, setFeedData] = useState({}); // catKey -> { items, loading, err, loaded }
+  const loadFeed = useCallback(async (catKey) => {
+    const path = ({ veg:'/feed/vegetables', talent:'/feed/talent', voice:'/feed/public-voice', guest:'/feed/guests' })[catKey];
+    if (!path) return;
+    setFeedData(prev => ({ ...prev, [catKey]: { ...(prev[catKey] || {}), loading: true, err: '' } }));
+    try {
+      const d = await apiCall(path);
+      const items = d.items || d.data || (Array.isArray(d) ? d : []);
+      setFeedData(prev => ({ ...prev, [catKey]: { items, loading: false, err: '', loaded: true } }));
+    } catch (e) {
+      const msg = String(e.message) === '404'
+        ? 'This feed isn’t available on the server yet (404) — deploy the endpoint to populate this tab.'
+        : (e.message || 'Failed to load');
+      setFeedData(prev => ({ ...prev, [catKey]: { items: [], loading: false, err: msg, loaded: true } }));
+    }
+  }, []);
+
   // Report counts (total + per-status) for the "Pending Review" KPI.
   const loadReportStats = useCallback(async () => {
     try {
@@ -144,6 +163,13 @@ function AdminDashboardScreen({ onBack }) {
     if (view === 'moderation') { loadReports(); loadClassifieds(); }
     if (view === 'users') { loadUsers(); loadLocations(); }
   }, [view, loadReports, loadClassifieds, loadUsers, loadLocations]);
+
+  // Lazy-load the per-category feed (veg/talent/voice/guest) when its tab opens.
+  useEffect(() => {
+    if (view === 'moderation' && FEED_ENDPOINT[reportCategory] && !feedData[reportCategory]?.loaded && !feedData[reportCategory]?.loading) {
+      loadFeed(reportCategory);
+    }
+  }, [view, reportCategory, loadFeed, feedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load on mount: user list (Citizens KPI) + report counts (Pending Review KPI).
   useEffect(() => { loadUsers(); loadReportStats(); }, [loadUsers, loadReportStats]);
@@ -1538,13 +1564,17 @@ function AdminDashboardScreen({ onBack }) {
       const CLASSIFIEDS_CAT_TYPE = { all:null, birthday:'birthday', anniversary:'anniversary', marriage:'marriage', whoiswho:'whoiswho', events:'event', jobs:'job', vehicle:'vehicle', rental:'rent', shopping:'shopping' };
       const isNewsCat = reportCategory === 'news';
       const isClassifiedsCat = Object.prototype.hasOwnProperty.call(CLASSIFIEDS_CAT_TYPE, reportCategory);
-      const isPlaceholderCat = !isNewsCat && !isClassifiedsCat;
+      const isFeedCat = Object.prototype.hasOwnProperty.call(FEED_ENDPOINT, reportCategory);
+      const isPlaceholderCat = !isNewsCat && !isClassifiedsCat && !isFeedCat;
       const activeCat = REPORT_CATS.find(c => c.key === reportCategory) || REPORT_CATS[0];
       const classifiedsType = CLASSIFIEDS_CAT_TYPE[reportCategory] || null;
       const visibleClassifieds = (classifiedsType
         ? classifieds.filter(it => String(it.type || '').toLowerCase() === classifiedsType)
         : classifieds
       ).filter(it => !q || [it.title, it.name, it.desc, it.location, it.cat].some(f => f != null && String(f).toLowerCase().includes(q)));
+      // Per-category feed (veg/talent/voice/guest)
+      const feedState = feedData[reportCategory] || {};
+      const feedItems = (feedState.items || []).filter(it => !q || [it.title, it.name, it.performerName, it.issueName, it.uploaderName, it.location, it.role].some(f => f != null && String(f).toLowerCase().includes(q)));
 
       return (
         <div>
@@ -1748,6 +1778,68 @@ function AdminDashboardScreen({ onBack }) {
                     <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                       <Chip txt={it.cat || it.type || activeCat.label} c="#3B82F6" />
                       {Array.isArray(it.images) && it.images.length > 1 && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🖼 {it.images.length}</span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>)}
+
+          {/* ── Per-category feeds: Veg prices / Talent / Public Voice / Guests ── */}
+          {isFeedCat && (<>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+              <span style={{fontSize:11,color:T.textMuted}}>Showing <b style={{color:T.text}}>{feedItems.length}</b> {activeCat.label.toLowerCase()} item{feedItems.length!==1?'s':''}</span>
+              <button onClick={()=>loadFeed(reportCategory)} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
+            </div>
+            {feedState.err && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{feedState.err}</div>}
+            {feedState.loading && !feedState.loaded && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading {activeCat.label.toLowerCase()}…</div>}
+            {feedState.loaded && feedItems.length === 0 && (
+              <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No {activeCat.label.toLowerCase()} items found.</div>
+            )}
+            {feedItems.map((it,i) => {
+              const img = it.image || (Array.isArray(it.images) && it.images[0]) || null;
+              const sub = it.role || it.eventName || it.uploaderName || it.performerName || it.issueName || '';
+              const st = String(it.status || '').trim();
+              const sc = /pending/i.test(st) ? '#F59E0B' : /approv|publish/i.test(st) ? '#10B981' : /reject/i.test(st) ? '#EF4444' : '#6B7280';
+              const vids = Array.isArray(it.videos) ? it.videos.filter(Boolean) : [];
+              const isVeg = reportCategory === 'veg';
+              return (
+                <div key={it.id || i} style={{...cardS, display:'flex', gap:11, alignItems:'flex-start'}}>
+                  {img
+                    ? <a href={img} target="_blank" rel="noreferrer" style={{width:64,height:64,borderRadius:9,flexShrink:0,backgroundImage:`url(${img})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`,display:'block'}}/>
+                    : <div style={{width:64,height:64,borderRadius:9,flexShrink:0,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{activeCat.icon}</div>}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:3}}>
+                      <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,
+                        display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+                        {it.title || it.name || '(untitled)'}
+                      </div>
+                      {st && <span style={{flexShrink:0}}><Chip txt={st} c={sc} /></span>}
+                    </div>
+                    {sub && <div style={{fontSize:11.5,color:T.textMuted,marginBottom:5,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{sub}</div>}
+                    <div style={{fontSize:11,color:T.textMuted,display:'flex',gap:10,flexWrap:'wrap',marginBottom:6}}>
+                      {(it.location || it.location_te) && <span>📍 {it.location || it.location_te}</span>}
+                      {it.date && <span>📅 {it.date}</span>}
+                      {it.time && <span>🕐 {it.time}</span>}
+                      {it.phone && <span>📞 {it.phone}</span>}
+                      {it.education && <span>🎓 {it.education}</span>}
+                      {typeof it.durationSeconds === 'number' && it.durationSeconds > 0 && <span>⏱ {it.durationSeconds}s</span>}
+                    </div>
+                    {/* Veg price board preview */}
+                    {isVeg && Array.isArray(it.prices) && it.prices.length > 0 && (
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>
+                        {it.prices.slice(0,6).map((p,j)=>(
+                          <span key={j} style={{fontSize:10.5,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:6,padding:'3px 7px'}}>
+                            {p.name_telugu} · {p.price_display || ('Rs.'+p.price)}
+                          </span>
+                        ))}
+                        {it.prices.length > 6 && <span style={{fontSize:10.5,color:T.textMuted,alignSelf:'center'}}>+{it.prices.length-6} more</span>}
+                      </div>
+                    )}
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      <Chip txt={it.cat || activeCat.label} c="#3B82F6" />
+                      {isVeg && typeof it.count === 'number' && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🥦 {it.count} items</span>}
+                      {vids.length > 0 && <a href={vids[0]} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.35)',borderRadius:6,padding:'3px 7px',textDecoration:'none'}}>🎬 Video</a>}
                     </div>
                   </div>
                 </div>

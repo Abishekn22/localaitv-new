@@ -44,6 +44,7 @@ const DEFAULT_SERVICE = 'main';
 // Anything not listed here is served by DEFAULT_SERVICE. Longest match wins.
 const ROUTES = {
   '/classifieds':    'aiservices',
+  '/feed':           'aiservices',  // /feed/vegetables, /feed/talent, /feed/public-voice, /feed/guests
   // Add new endpoint prefixes here, e.g.:
   //   '/forms':  'aiservices',
   //   '/upload': 'aiservices'
