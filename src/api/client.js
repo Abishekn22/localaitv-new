@@ -30,9 +30,9 @@ const _isDev = _mode === 'dev';
 export const BACKENDS = {
   // URL 1 — main app backend: news, incidents, auth, election, leaderboard,
   //         projects, utility (veg/weather), contacts, reports, users…
-  main:       _env.VITE_API_BASE   || (_isDev ? 'http://localhost:5000/api' : 'https://localaitv.com/api'),
+  main:       _env.VITE_API_BASE   || 'https://localaitv.com/api',
   // URL 2 — aimodelsss backend: the classifieds feed + all forms + upload.
-  aiservices: _env.VITE_API_BASE_2 || (_isDev ? 'http://localhost:5000/api' : 'https://aiservices.localaitv.com/api'),
+  aiservices: _env.VITE_API_BASE_2 || 'https://aiservices.localaitv.com/api',
   // Add more backends here, e.g.:
   //   media: _env.VITE_API_BASE_MEDIA || (_isDev ? 'http://localhost:5000/api' : 'https://media.localaitv.com/api'),
 };
