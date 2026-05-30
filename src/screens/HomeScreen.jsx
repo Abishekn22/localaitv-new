@@ -1543,18 +1543,21 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
                 Health:'https://images.unsplash.com/photo-1579684385127-1ef15d508118?w=600&q=75',
                 Education:'https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=600&q=75',
                 Crime:'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=600&q=75',
-                Weather:'https://images.unsplash.com/photo-1504608524841-42584120d693?w=600&q=75',
+                Weather:'/placeholder.svg',
                 Sports:'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=600&q=75',
                 Business:'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=600&q=75',
                 Culture:'https://images.unsplash.com/photo-1533929736458-ca588d08c8be?w=600&q=75',
-                Devotional:'https://images.unsplash.com/photo-1588416499018-d8c621e7d2c2?w=600&q=75',
+                Devotional:'/placeholder.svg',
                 Local:'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=600&q=75',
               };
               const ytSrc  = n.ytId ? `https://img.youtube.com/vi/${n.ytId}/hqdefault.jpg` : null;
               const imgSrc = ytSrc || n.thumbnail || catImgs[n.cat] || catImgs.District;
-              const onImgError = ytSrc
-                ? e => { e.target.src = n.thumbnail || catImgs[n.cat] || catImgs.District; }
-                : e => { e.target.src = catImgs.District; };
+              const onImgError = e => {
+                // Terminal fallback is a same-origin asset so a failed image can
+                // never 404-to-HTML and trigger CORB, nor loop on itself.
+                if (e.target.src.endsWith('/placeholder.svg')) return;
+                e.target.src = '/placeholder.svg';
+              };
 
               /* ══════════════════════════════════════════════════════════
                  LEAD CARD (idx === 0) — Phase-5 editorial hierarchy

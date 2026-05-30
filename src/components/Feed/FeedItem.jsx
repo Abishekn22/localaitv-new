@@ -67,7 +67,7 @@ function FeedItem({ item, isActive, onShare }) {
             <img src={item.thumb}
               alt={item.headline}
               style={{ width:'100%', height:'100%', objectFit:'cover' }}
-              onError={e => { e.target.src='https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&q=80'; }}
+              onError={e => { if (e.target.src.endsWith('/placeholder.svg')) return; e.target.src='/placeholder.svg'; }}
             />
             {/* Play overlay if has video */}
             {item.ytId && !isActive && (

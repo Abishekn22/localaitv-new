@@ -230,7 +230,7 @@ const NEWS_ITEMS = [
     channel:"Kurnool TV", district:"Kurnool", constituency:"Kurnool",
     time:"6 hr ago", views:"19.4K", live:false, reporter:"రవి కుమార్",
     location:"Kurnool", emoji:"🏆", uploadedAt:"2026-05-10T06:00:00",
-    ytId:"x96ywTWbe1A", thumbnail:"https://images.unsplash.com/photo-1540747913346-19212a4b423d?w=600&q=80",
+    ytId:"x96ywTWbe1A", thumbnail:"/placeholder.svg",
     fullText:"కర్నూలు జిల్లాకు చెందిన 22 ఏళ్ల ఫాస్ట్ బౌలర్ SRH స్క్వాడ్‌లో చేర్చబడ్డాడు. జిల్లాలో సంబురాలు నిర్వహించారు." },
   { id:113, title:"AP కబడ్డీ జట్టు జాతీయ చాంపియన్",
     titleEn:"AP Kabaddi team wins National championship", cat:"Sports",
@@ -244,7 +244,7 @@ const NEWS_ITEMS = [
     channel:"LocalAI TV", district:"National", constituency:"National",
     time:"Yesterday", views:"34.6K", live:false, reporter:"సునీత దేవి",
     location:"Bangkok", emoji:"🏅", uploadedAt:"2026-05-09T15:00:00",
-    ytId:"H4ZG2BWqFs0", thumbnail:"https://images.unsplash.com/photo-1553005746-85c4f5b20aaa?w=600&q=80",
+    ytId:"H4ZG2BWqFs0", thumbnail:"/placeholder.svg",
     fullText:"భారత హాకీ జట్టు ఏషియన్ గేమ్స్ 2026లో స్వర్ణ పతకం గెలుచుకుంది. ఫైనల్‌లో పాకిస్తాన్‌ను 3-1తో ఓడించింది." },
 
   // ═══ AGRICULTURE NEWS ═══════════════════════════════════════

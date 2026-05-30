@@ -9,6 +9,11 @@ import { API_BASE } from '../api/client.js';
 // the trailing /api).
 export function resolveMediaUrl(u) {
   if (!u) return '';
+  // Reject backend-broken keys that are actually Windows local filesystem paths
+  // (e.g. "C:\Users\…\file.jpg", often percent-encoded as %3A %5C). They never
+  // exist in S3 → 403/404 → CORB console noise. Return a same-origin placeholder
+  // so the bad URL is never requested.
+  if (u.includes('\\') || u.includes('%5C')) return '/placeholder.svg';
   if (u.startsWith('http')) return u;
   const imgHost = API_BASE.replace(/\/api\/?$/, '');
   return `${imgHost}${u}`;

@@ -1,4 +1,21 @@
 // Classifieds & related taxonomy (categories, badges, no-call list, sub-categories).
+
+// Same-origin fallback image (served from /public). Used wherever a remote
+// image may be missing/dead — a local asset can never 404-to-HTML and so can
+// never trigger Cross-Origin Read Blocking (CORB) the way a dead CDN URL does.
+const PLACEHOLDER_IMG = '/placeholder.svg';
+
+// Guard an image URL before it reaches an <img src>. Returns the same-origin
+// placeholder for empty values AND for backend-broken keys that are actually
+// Windows local filesystem paths (e.g. "C:\Users\…\file.jpg", usually
+// percent-encoded as %3A %5C). Those keys never exist in S3 → 403/404 → CORB
+// console noise. Filtering them here means the bad URL is never requested.
+function safeImageUrl(u, fallback = PLACEHOLDER_IMG) {
+  if (!u || typeof u !== 'string') return fallback;
+  if (u.includes('\\') || u.includes('%5C') || /^[A-Za-z]:[\\/]/.test(u)) return fallback;
+  return u;
+}
+
 // ── CLASSIFIEDS DATA ──────────────────────────────────────────
 const CLASSIFIEDS = [
   // ═══════════════════════════════════════════════════════════
@@ -79,7 +96,7 @@ const CLASSIFIEDS = [
   { id:10, orientation:'horizontal', cat:'Birthdays', type:'birthday', badge:'🎂 పుట్టినరోజు',
     title:'శ్రీమతి లక్ష్మీదేవి గారికి 60వ పుట్టినరోజు శుభాకాంక్షలు!',
     desc:'మా అమ్మ శ్రీమతి వెంకట లక్ష్మీదేవి గారికి 60వ పుట్టినరోజు శుభాకాంక్షలు! ఆమె ప్రేమ, ఆప్యాయత, త్యాగాలు మాకు నిత్యం స్ఫూర్తి. మీకు దీర్ఘాయుష్షు, ఆరోగ్యం, ఆనందం కలగాలని మా హృదయపూర్వక ప్రార్థనలు. 💐\n\n— మీ పిల్లలు, మనవళ్లు, మనవరాళ్లు',
-    images:['https://images.unsplash.com/photo-1558636508-e0969431e745?w=600&q=80','https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?w=600&q=80'],
+    images:['/placeholder.svg','https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?w=600&q=80'],
     phone:null, location:'కర్నూలు', time:'8:00 AM', date:'మే 10, 2026',
     uploadedAt:'2026-05-10T08:00:00', uploaderName:'కుమారులు & కుమార్తెలు', uploaderPhoto:'https://i.pravatar.cc/80?img=21' },
 
@@ -93,7 +110,7 @@ const CLASSIFIEDS = [
   { id:12, orientation:'horizontal', cat:'Birthdays', type:'birthday', badge:'🎂 Happy Birthday',
     title:'కుమారుడు శ్రేయాంశ్ కు 7వ పుట్టినరోజు శుభాకాంక్షలు',
     desc:'మా ముద్దుల బాబు శ్రేయాంశ్‌కు 7వ పుట్టినరోజు శుభాకాంక్షలు! నీ నవ్వు మా ఇంటికి వెలుతురు. నీ భవిష్యత్తు బంగారు బాట కావాలని ఆశిస్తున్నాం. Happy Birthday బేటా! 🎉🎁\n\n— అమ్మ, నాన్న',
-    images:['https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=600&q=80','https://images.unsplash.com/photo-1558636508-e0969431e745?w=600&q=80'],
+    images:['https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=600&q=80','/placeholder.svg'],
     phone:null, location:'కర్నూలు', time:'9:00 AM', date:'మే 10, 2026',
     uploadedAt:'2026-05-10T09:00:00', uploaderName:'ప్రేమతో తల్లిదండ్రులు', uploaderPhoto:'https://i.pravatar.cc/80?img=25' },
 
@@ -193,7 +210,7 @@ const CLASSIFIEDS = [
   { id:'pv1', orientation:'vertical',   ytId:'vLQ32b7rMAs', cat:'Public Voice', type:'publicvoice', badge:'📢 రోడ్డు సమస్య · Road',
     title:'గాంధీ నగర్‌లో రోడ్డు పగుళ్లు — వాహన చోదకులకు ఇబ్బంది',
     desc:'మా కాలనీలో ప్రధాన రోడ్డు పూర్తిగా దెబ్బతిన్నది. వర్షాల తర్వాత గుంతలు ఎక్కువయ్యాయి. స్కూటర్లు, బైక్‌లు నడపడం కష్టంగా ఉంది. దయచేసి సంబంధిత అధికారులు దృష్టి సారించాలి.\n\n📍 గాంధీ నగర్, కర్నూలు · 📞 9701234567',
-    images:['https://images.unsplash.com/photo-1591622180929-4d4f5b3f8b25?w=600&q=80'],
+    images:[PLACEHOLDER_IMG],  // was a dead Unsplash URL (404 → HTML), replaced with same-origin placeholder
     phone:'9701234567', location:'గాంధీ నగర్, కర్నూలు', time:'6:45 PM', date:'మే 22, 2026',
     uploadedAt:'2026-05-22T18:45:00', uploaderName:'రామకృష్ణ', uploaderPhoto:'https://i.pravatar.cc/80?img=14' },
 
@@ -228,7 +245,7 @@ const CLASSIFIEDS = [
   { id:'pv6', orientation:'horizontal', ytId:'H_9fAXotXOo', cat:'Public Voice', type:'publicvoice', badge:'📢 దోమల సమస్య · Mosquitoes',
     title:'రామకృష్ణ నగర్‌లో డెంగ్యూ ప్రమాదం — దోమలు పెరిగాయి',
     desc:'మా ఏరియాలో డ్రైనేజ్ నీళ్లు నిల్వ ఉండడం వల్ల దోమలు ఎక్కువయ్యాయి. డెంగ్యూ, మలేరియా కేసులు పెరుగుతున్నాయి. ఫాగింగ్ నెలల తరబడి జరగట్లేదు. ఆరోగ్య శాఖ తక్షణం స్పందించాలని విజ్ఞప్తి.\n\n📍 రామకృష్ణ నగర్, కర్నూలు · 📞 9494005566',
-    images:['https://images.unsplash.com/photo-1568215534-95b5d2af3df8?w=600&q=80'],
+    images:['/placeholder.svg'],
     phone:'9494005566', location:'రామకృష్ణ నగర్, కర్నూలు', time:'6:00 PM', date:'మే 21, 2026',
     uploadedAt:'2026-05-21T18:00:00', uploaderName:'మహేష్', uploaderPhoto:'https://i.pravatar.cc/80?img=8' },
 
@@ -242,7 +259,7 @@ const CLASSIFIEDS = [
   { id:'pv8', orientation:'horizontal', ytId:'9_I6Y38gSHc', cat:'Public Voice', type:'publicvoice', badge:'📢 వీధి దీపాలు · Streetlights',
     title:'NTR నగర్‌లో నెలగా వీధి దీపాలు బంద్ — రాత్రి చీకటి',
     desc:'మా కాలనీలో సెకండ్ క్రాస్ నుండి థర్డ్ క్రాస్ వరకు వీధి దీపాలన్నీ పనిచేయడం లేదు. రాత్రి పూట మహిళలు, విద్యార్థులు బయటకి వెళ్లాలంటే భయం. మున్సిపల్ వారు చాలా సార్లు రిపోర్ట్ చేశాం.\n\n📍 NTR నగర్, కర్నూలు · 📞 9701884455',
-    images:['https://images.unsplash.com/photo-1444930694458-01babe71870c?w=600&q=80'],
+    images:['/placeholder.svg'],
     phone:'9701884455', location:'NTR నగర్, కర్నూలు', time:'9:20 PM', date:'మే 20, 2026',
     uploadedAt:'2026-05-20T21:20:00', uploaderName:'రాజేంద్ర', uploaderPhoto:'https://i.pravatar.cc/80?img=22' },
 
@@ -252,7 +269,7 @@ const CLASSIFIEDS = [
   { id:15, orientation:'horizontal', cat:'Events', type:'event', badge:'🎉 ఈవెంట్',
     title:'కర్నూలు ట్రేడ్ ఫేర్ 2026 — మే 15-20',
     desc:'కర్నూలు జిల్లా వ్యాపారుల సంఘం నిర్వహిస్తున్న వార్షిక ట్రేడ్ ఫేర్!\n\n🗓️ తేదీ: మే 15-20, 2026\n📍 వేదిక: కర్నూలు ఎగ్జిబిషన్ గ్రౌండ్స్\n⏰ సమయం: ఉదయం 10 - రాత్రి 9\n\n200+ స్టాల్స్ | ఉచిత ప్రవేశం | సాంస్కృతిక కార్యక్రమాలు | ఫుడ్ కోర్ట్ | లైవ్ మ్యూజిక్ ప్రతి రాత్రి.',
-    images:['https://images.unsplash.com/photo-1501386761578-eaa54b8b8f04?w=600&q=80','https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80','https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=600&q=80'],
+    images:['/placeholder.svg','https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80','https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=600&q=80'],
     phone:null, location:'కర్నూలు ఎగ్జిబిషన్ గ్రౌండ్స్', time:'9:00 AM', date:'మే 10, 2026',
     uploadedAt:'2026-05-10T09:00:00', uploaderName:'కర్నూలు వ్యాపారుల సంఘం', uploaderPhoto:'https://i.pravatar.cc/80?img=31' },
 
@@ -298,7 +315,7 @@ const CL_CAT_IMG = {
   Marriages:      'https://images.unsplash.com/photo-1606800052052-a08af7148866?w=400&q=75',
   'Who is Who':   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&q=75',
   'Talent Show':  'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=75',
-  'Public Voice': 'https://images.unsplash.com/photo-1591622180929-4d4f5b3f8b25?w=400&q=75',
+  'Public Voice': PLACEHOLDER_IMG,  // was a dead Unsplash URL (404 → HTML) that triggered CORB on every Public Voice card
   Jobs:           'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=400&q=75',
   'Car Sales':    'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&q=75',
   Events:         'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400&q=75',
@@ -311,7 +328,7 @@ const NO_CALL_CATS = ['Wishes','Marriage'];
 
 
 
-export { CLASSIFIEDS, CL_CATS, CL_CATS_TE, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS };
+export { CLASSIFIEDS, CL_CATS, CL_CATS_TE, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, PLACEHOLDER_IMG, safeImageUrl };
 const CL_SUBCATS = [
   { id:'All',          label:'అన్నీ',           emoji:'📋' },
   { id:'Birthdays',    label:'పుట్టినరోజులు',    emoji:'🎂' },

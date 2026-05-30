@@ -22,7 +22,7 @@ export { AP_CONSTITUENCIES, TG_CONSTITUENCIES } from './data/constituencies.js';
 export { NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS } from './data/news.js';
 export {
   CLASSIFIEDS, CL_CATS, CL_CATS_TE, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR,
-  NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS,
+  NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, PLACEHOLDER_IMG, safeImageUrl,
 } from './data/classifieds.js';
 export { CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName } from './data/channels.js';
 export {

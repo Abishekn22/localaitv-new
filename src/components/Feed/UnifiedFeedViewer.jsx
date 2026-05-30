@@ -467,8 +467,7 @@ function normaliseFeedItems(items, type) {
       headline:   item.titleTe || item.title,
       headlineEn: item.titleEn || item.title,
       videoId:    item.ytId || null,
-      thumbnail:  item.thumbnail || CL_CAT_IMG[item.cat] ||
-                  'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=400&q=75',
+      thumbnail:  item.thumbnail || CL_CAT_IMG[item.cat] || '/placeholder.svg',
       fullText:   item.body || item.titleTe || item.title,
       reporter:   item.reporter || item.channel || 'LocalAI TV',
       location:   item.location || item.district || 'కర్నూలు జిల్లా',

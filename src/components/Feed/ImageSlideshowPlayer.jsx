@@ -1,11 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
 
+// Some upload keys are stored by a backend bug as Windows local paths
+// (e.g. "C:\Users\…\file.jpg", percent-encoded as %3A %5C). Those never exist
+// in S3 → 403/404 → CORB console noise. Drop them before they reach <img src>.
+function isBrokenKey(u) {
+  return typeof u !== 'string' || u.includes('\\') || u.includes('%5C') || u.includes('%3A%5C');
+}
+
 function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
   const { T } = useAppTheme();
   const [slide, setSlide]   = useState(0);
   const [fading, setFading]  = useState(false);
-  const total = images?.length || 0;
+  const safeImages = Array.isArray(images) ? images.filter(u => !isBrokenKey(u)) : [];
+  const safeVideos = Array.isArray(videos) ? videos.filter(u => !isBrokenKey(u)) : [];
+  const total = safeImages.length;
 
   // Auto-advance slides every 2.8s when active
   useEffect(() => {
@@ -39,11 +48,11 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
   };
 
   // If an uploaded video is present, play it (autoplay, looped, with controls).
-  if (Array.isArray(videos) && videos.length > 0) {
+  if (safeVideos.length > 0) {
     return (
       <div style={{ width:'100%', height:'100%', position:'relative', background:'#000' }}>
         <video
-          src={videos[0]}
+          src={safeVideos[0]}
           autoPlay={isActive}
           muted
           loop
@@ -78,7 +87,7 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
 
         {/* Current image */}
         <img
-          src={images[slide]}
+          src={safeImages[slide]}
           alt=""
           style={{
             position:'absolute', inset:0,
@@ -110,7 +119,7 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
             transform:'translateX(-50%)',
             display:'flex', gap:5, zIndex:5,
           }}>
-            {images.map((_,i) => (
+            {safeImages.map((_,i) => (
               <div key={i} onClick={() => setSlide(i)} style={{
                 width: i===slide ? 18 : 6, height:6,
                 borderRadius:3, cursor:'pointer',
