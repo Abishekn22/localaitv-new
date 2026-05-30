@@ -46,6 +46,11 @@ const ROUTES = {
   '/classifieds':    'aiservices',
   '/feed':           'aiservices',  // /feed/vegetables, /feed/talent, /feed/public-voice, /feed/guests
   '/public-voice-requests': 'aiservices',  // GET list/detail of public-voice submissions
+  // /utility/trains, /utility/veg-prices, /utility/bullion — all served by
+  // form_server/utility_feed.py on the aimodelsss (aiservices) backend.
+  // The main backend at localaitv.com doesn't have these routes and would
+  // 404, causing the UI to fall back to hardcoded TRAIN_FALLBACK / VEG_FALLBACK.
+  '/utility':        'aiservices',
   // Add new endpoint prefixes here, e.g.:
   //   '/forms':  'aiservices',
   //   '/upload': 'aiservices'
