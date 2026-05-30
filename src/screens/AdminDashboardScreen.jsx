@@ -542,63 +542,113 @@ function AdminDashboardScreen({ onBack }) {
   ];
 
   const ADMIN_NAMES = ['Koneti Mohan Reddy','Priya Senior','Ravi Kumar','Lakshmi Devi','Karthik N'];
-  const SUBMITTER_NAMES = ['Suresh Chowdary','Padmaja Reddy','Anjali Sharma','Naveen Kumar','Deepa Rao','Kishore Babu','Sunitha M','Vijay Krishna','Bhargavi N','Harsha Vardhan','Madhu Sudhan','Sireesha','Phani Kumar','Rajeshwari','Vamsi Krishna'];
   const DAYS_AGO = (n) => {
     const d = new Date(); d.setDate(d.getDate() - n);
     return d.toLocaleDateString('en-IN', { day:'numeric', month:'short' }) + ' · ' +
            ((n===0)?'Today':(n===1?'Yesterday':n+'d ago'));
   };
 
-  const seedForms = () => {
-    let serial = 1; const out = [];
-    FORM_CATS.forEach(cat => {
-      const n = 5 + (hash(cat.key+'n')%4); // 5–8 per category
-      for (let i=0; i<n; i++) {
-        const k = cat.key+'s'+i;
-        const ageDays = i + (hash(k+'d')%5);
-        const sub = SUBMITTER_NAMES[hash(k+'sn')%SUBMITTER_NAMES.length];
-        const statusKey = cat.statuses[hash(k+'st')%cat.statuses.length];
-        // 0–3 prior follow-ups for variety
-        const fuCount = hash(k+'fc')%4;
-        const followUps = [];
-        for (let f=0; f<fuCount; f++) {
-          followUps.push({
-            at: DAYS_AGO(ageDays - 1 - f),
-            by: ADMIN_NAMES[hash(k+'fa'+f)%ADMIN_NAMES.length],
-            status: cat.statuses[hash(k+'fs'+f)%cat.statuses.length],
-            note: pick(k+'fn'+f,[
-              'Called — line busy, will retry tomorrow.',
-              'Spoke for 5 mins — sent rate card on WhatsApp.',
-              'Asked for proposal in writing; promised by EOD.',
-              'Discussed budget — needs internal approval.',
-              'Site visit scheduled for next week.',
-              'Forwarded to ops team for technical check.',
-            ]),
-          });
-        }
-        out.push({
-          id: 'FRM-'+(10000+(hash(k)%89999)),
-          serial: serial++,
-          category: cat.key,
-          name: sub,
-          phone: '+91 '+(70000+(hash(k+'p')%29999))+' '+(10000+(hash(k+'p2')%89999)),
-          email: sub.toLowerCase().replace(/[^a-z]+/g,'.')+'@gmail.com',
-          city: pick(k+'ct',['Kurnool','Guntur','Vijayawada','Tirupati','Hyderabad','Bengaluru','Visakhapatnam','Nellore']),
-          submittedAt: DAYS_AGO(ageDays),
-          details: cat.sample[hash(k+'sm')%cat.sample.length],
-          fullText: 'Submitted via the LocalAI TV ' + cat.label + ' form. ' +
-            'The submitter has expressed interest and provided contact details for further communication. ' +
-            'Please review the request and add follow-up notes below.',
-          files: (hash(k+'f')%3 === 0) ? [{ name:'proposal.pdf', size:(120+(hash(k+'fsz')%480))+' KB' }] : [],
-          status: statusKey,
-          followUps,
-        });
-      }
-    });
-    // Newest-first within category — serial is preserved for stable id
-    return out.sort((a,b)=> hash(b.id)%1000 - hash(a.id)%1000);
+  // ── Real form submissions, loaded from the main backend /contacts table ─────
+  // The table only stores { name, email, subject, message, created_at, updated_at }
+  // with NO category column — so each row is CLASSIFIED here by the marker text
+  // its source form wrote into subject/message (see AdvertiseScreen,
+  // ChannelPartnerScreen, GrievanceScreen / GrievanceBlock). Rows that don't
+  // match a known form marker fall through to 'contact' (the Contact Us tile),
+  // which acts as the catch-all so EVERY row in the table is viewable. CRM-only
+  // fields the table lacks (status, follow-ups, files) start empty; phone & city
+  // are parsed out of the message body where a form embedded them, else '—'.
+  const OTHER_CAT = { key:'other', label:'Other / General', icon:'📨', c:T.textMuted };
+  // Markers cover every historical form layout seen in the live /contacts table
+  // (the marker text changed across app versions — some forms write it in the
+  // subject, others only in the message body). Anything unrecognised falls
+  // through to 'contact' (the Contact Us catch-all) so no row is ever hidden.
+  const classifyContact = (subject, message) => {
+    const m = (message || '').toLowerCase();
+    const t = (subject || '').toLowerCase() + '\n' + m;
+    // 1) Grievance / complaint — most specific first.
+    if (/grievance/.test(t) || /complaint\s*details\s*:/.test(t) ||
+        (/category\s*:/.test(m) && /details\s*:/.test(m)))                 return 'complaint';
+    // 2) Advertise — "Advertise With Us", "Ad Booking …", "Ad Type:", "advertisement".
+    if (/advertis/.test(t) || /ad\s*booking/.test(t) || /ad\s*type\s*:/.test(t)) return 'advertise';
+    // 3) Channel Partner — application/inquiry, partnership, franchise, join-form
+    //    fields, plus free-text "join / interested in local ai tv" notes.
+    if (/channel\s*partner/.test(t) || /partnership/.test(t) || /franchise/.test(t) ||
+        /why do you want to join/.test(m) || /current work\s*\/\s*business\s*:/.test(m) ||
+        /join\s*local\s*ai/.test(t) || /local\s*ai\s*tv/.test(t)) return 'partner';
+    // 4) Catch-all → Contact Us tile.
+    return 'contact';
   };
-  const [formSubs, setFormSubs] = useState(seedForms);
+  const parseContactPhone = (message) => {
+    const msg = message || '';
+    let m = msg.match(/(?:Phone|Mobile)\s*:\s*([+\d][\d\s+()\-]{6,})/i);
+    if (!m) m = msg.match(/(\+?\d[\d\s\-]{8,}\d)/);   // fallback: any phone-like run ("call me +91 …")
+    const v = m && m[1] ? m[1].trim() : '';
+    return (v && !/not\s*provided/i.test(v)) ? v : '';
+  };
+  const parseContactCity = (message) => {
+    // Town/Constituency is the most precise locality; fall back to City.
+    const m = (message || '').match(/(?:Town\s*\/\s*Constituency|Constituency\s*\/\s*Town|Constituency|City)\s*:\s*(.+)/i);
+    return m && m[1] ? m[1].trim() : '';
+  };
+  const fmtContactDate = (iso) => {
+    if (!iso) return 'Date unavailable';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return 'Date unavailable';
+    return d.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+  };
+  const mapContact = (c, idx) => {
+    const subject = c.subject || '', message = c.message || '';
+    const created = c.created_at || c.createdAt || c.created || '';
+    return {
+      id: String(c.id != null ? c.id : (c._id != null ? c._id : 'CT-' + idx)),
+      serial: idx + 1,
+      category: classifyContact(subject, message),
+      name: c.name || 'Unknown',
+      phone: parseContactPhone(message) || '—',
+      email: c.email || '—',
+      city: parseContactCity(message) || '—',
+      submittedAt: fmtContactDate(created),
+      _ts: Date.parse(created) || 0,
+      details: subject || '(no subject)',
+      fullText: message || '(no message body)',
+      files: [],
+      status: 'new',
+      followUps: [],
+    };
+  };
+
+  const [formSubs, setFormSubs] = useState([]);   // real /contacts rows (demo seed removed)
+  const [formsLoading, setFormsLoading] = useState(false);
+  const [formsErr, setFormsErr] = useState('');
+  const [formsLoaded, setFormsLoaded] = useState(false);
+  // GET /contacts?offset=&limit= (admin JWT via adminFetch) → { data:[...], total }.
+  // All pages are walked so the category tiles show accurate totals.
+  const loadContacts = useCallback(async () => {
+    setFormsLoading(true); setFormsErr('');
+    try {
+      const PAGE = 100;
+      let offset = 0, total = Infinity, rows = [];
+      while (offset < total) {
+        const d = await adminFetch(`/contacts?offset=${offset}&limit=${PAGE}`);
+        const batch = (d && (d.data || d.items)) || (Array.isArray(d) ? d : []);
+        rows = rows.concat(batch);
+        total = (d && typeof d.total === 'number') ? d.total : rows.length;
+        offset += PAGE;
+        if (!batch.length) break;
+      }
+      setFormSubs(rows.map(mapContact).sort((a, b) => b._ts - a._ts));
+      setFormsLoaded(true);
+    } catch (e) {
+      setFormsErr(e.message || 'Failed to load form submissions');
+    } finally {
+      setFormsLoading(false);
+    }
+  }, [adminFetch]);
+  // Lazy-load contacts when the Form Submissions card is opened. Kept as its own
+  // effect (after loadContacts is defined) to avoid a temporal-dead-zone ref.
+  useEffect(() => {
+    if (view === 'forms' && !formsLoaded && !formsLoading) loadContacts();
+  }, [view, loadContacts, formsLoaded, formsLoading]);
   const [formNote, setFormNote] = useState('');
   const [formNextStatus, setFormNextStatus] = useState('contacted');
   const addFollowUp = (id, note, nextStatus) => {
@@ -1088,7 +1138,9 @@ function AdminDashboardScreen({ onBack }) {
 
   // ── Forms CRM: hub (category tiles + totals) ──
   function FormsHub() {
-    const totalsBy = (k) => formSubs.filter(s => s.category === k).length;
+    // 'contact' is the master list — it shows the ENTIRE /contacts table; the
+    // other tiles show only the rows that matched their form's markers.
+    const totalsBy = (k) => k === 'contact' ? formSubs.length : formSubs.filter(s => s.category === k).length;
     const total = formSubs.length;
     return (
       <div>
@@ -1098,6 +1150,15 @@ function AdminDashboardScreen({ onBack }) {
             Total inputs across all forms: <b>{total}</b>. Tap any category to view its submissions and follow-up history.
           </div>
         </div>
+        {formsErr ? (
+          <div style={{...cardS,textAlign:'center',padding:'24px 18px'}}>
+            <div style={{fontSize:13,color:'#EF4444',fontWeight:700,marginBottom:10}}>{formsErr}</div>
+            <button onClick={loadContacts} style={{fontSize:12,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 14px',cursor:'pointer'}}>↻ Retry</button>
+          </div>
+        ) : (formsLoading && !formsLoaded) ? (
+          <div style={{...cardS,textAlign:'center',color:T.textMuted,padding:'30px 18px',fontSize:13}}>Loading form submissions…</div>
+        ) : (
+        <>
         <SecH>By category</SecH>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>
           {FORM_CATS.map(c => (
@@ -1113,8 +1174,10 @@ function AdminDashboardScreen({ onBack }) {
           ))}
         </div>
         <SecH>Recent activity</SecH>
-        {formSubs.slice(0,4).map(s => {
-          const cat = FORM_CATS.find(c => c.key === s.category) || {};
+        {formSubs.length === 0 ? (
+          <div style={{...cardS,textAlign:'center',color:T.textMuted,padding:'24px 18px',fontSize:12}}>No form submissions yet.</div>
+        ) : [...formSubs].sort((a,b)=> b._ts - a._ts).slice(0,4).map(s => {  // newest first by created_at
+          const cat = FORM_CATS.find(c => c.key === s.category) || OTHER_CAT;
           const st = FORM_STATUS[s.status] || {l:s.status,c:T.textMuted};
           return (
             <button key={s.id} onClick={()=>{ setFormNote(''); setFormNextStatus(s.status); pushDrill({type:'formdetail', sub:s}); }}
@@ -1128,17 +1191,20 @@ function AdminDashboardScreen({ onBack }) {
             </button>
           );
         })}
+        </>
+        )}
       </div>
     );
   }
 
   // ── Forms CRM: list within a category ──
   function FormsList({ category }) {
-    const cat = FORM_CATS.find(c => c.key === category) || {};
+    const cat = FORM_CATS.find(c => c.key === category) || OTHER_CAT;
     const [stFilter, setStFilter] = useState('All');
-    const all = formSubs.filter(s => s.category === category);
+    // 'contact' is the master list (entire table); the rest filter by category.
+    const all = category === 'contact' ? formSubs : formSubs.filter(s => s.category === category);
     const items = all.filter(s => stFilter==='All' || s.status===stFilter);
-    const cats = ['All', ...cat.statuses];
+    const cats = ['All', ...(cat.statuses || formStatusKeys)];
     return (
       <div>
         <div style={{...cardS,background:cat.c+'14',borderColor:cat.c+'55'}}>
@@ -1189,7 +1255,7 @@ function AdminDashboardScreen({ onBack }) {
 
   // ── Forms CRM: per-submission detail + follow-up composer + history ──
   function FormDetail({ sub }) {
-    const cat = FORM_CATS.find(c => c.key === sub.category) || {};
+    const cat = FORM_CATS.find(c => c.key === sub.category) || OTHER_CAT;
     const live = formSubs.find(s => s.id === sub.id) || sub;
     const st = FORM_STATUS[live.status] || {l:live.status, c:T.textMuted};
     const submitFollowUp = () => {
