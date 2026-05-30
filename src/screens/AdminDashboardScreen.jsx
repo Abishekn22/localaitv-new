@@ -156,6 +156,66 @@ function AdminDashboardScreen({ onBack }) {
     }
   }, []);
 
+  // ── Unified admin CRUD (form_server /api/admin/{resource}) ────────────────
+  // One consistent verify + delete API over every bulletin resource EXCEPT
+  // public-voice (its own verifyVoice/deleteVoice above) and news (the reports
+  // workflow). Used by the classifieds catalogs + the talent feed.
+  //
+  // `apiId` is the RAW table id the admin API matches (e.g. 22). `localId` is
+  // the prefixed id the read feeds return (e.g. "sh22", "talent28") — used to
+  // find the row in local state and to key the busy flag. They differ because
+  // classifieds_feed.py / section_feeds.py prefix ids per type, while the admin
+  // CRUD routes match the underlying table id (id::text).
+  const [crudBusy, setCrudBusy] = useState(null); // `${resource}:${localId}` currently mutating
+
+  const applyLocal = useCallback((catKey, matchId, mutate) => {
+    if (catKey === 'talent') {
+      setFeedData(prev => {
+        const cur = prev.talent;
+        if (!cur) return prev;
+        return { ...prev, talent: { ...cur, items: mutate(cur.items || []) } };
+      });
+    } else {
+      setClassifieds(cs => mutate(cs));
+    }
+  }, []);
+
+  const verifyRecord = useCallback(async (resource, apiId, verified, catKey, localId) => {
+    if (!resource) return;
+    const matchId = localId == null ? apiId : localId;
+    const key = `${resource}:${matchId}`;
+    setCrudBusy(key);
+    try {
+      const d = await apiCall(`/admin/${resource}/${apiId}/verify`, {
+        method: 'PATCH', body: JSON.stringify({ verified }),
+      });
+      const next = (d && d.item && 'verified' in d.item) ? { verified: d.item.verified } : { verified };
+      applyLocal(catKey, matchId, items => items.map(it => String(it.id) === String(matchId) ? { ...it, ...next } : it));
+    } catch (e) {
+      const code = String(e.message || '');
+      alert(code.includes('404')
+        ? `Verify endpoint not found (404) — PATCH /api/admin/${resource}/:id/verify isn’t deployed yet.`
+        : (e.message || 'Failed to update verification'));
+    } finally { setCrudBusy(b => b === key ? null : b); }
+  }, [applyLocal]);
+
+  const deleteRecord = useCallback(async (resource, apiId, catKey, localId) => {
+    if (!resource) return;
+    if (!window.confirm(`Delete this ${resource} record permanently?`)) return;
+    const matchId = localId == null ? apiId : localId;
+    const key = `${resource}:${matchId}`;
+    setCrudBusy(key);
+    try {
+      await apiCall(`/admin/${resource}/${apiId}`, { method: 'DELETE' });
+      applyLocal(catKey, matchId, items => items.filter(it => String(it.id) !== String(matchId)));
+    } catch (e) {
+      const code = String(e.message || '');
+      alert(code.includes('404')
+        ? 'Already deleted or not found (404).'
+        : (e.message || 'Failed to delete'));
+    } finally { setCrudBusy(b => b === key ? null : b); }
+  }, [applyLocal]);
+
   // Report counts (total + per-status) for the "Pending Review" KPI.
   const loadReportStats = useCallback(async () => {
     try {
@@ -1688,11 +1748,30 @@ function AdminDashboardScreen({ onBack }) {
       // Routing: News → /webhooks/reports · classifieds tabs → /api/classifieds (by type)
       // · the rest (veg/talent/voice/guest) have no GET feed yet → placeholder.
       const CLASSIFIEDS_CAT_TYPE = { all:null, birthday:'birthday', anniversary:'anniversary', marriage:'marriage', whoiswho:'whoiswho', events:'event', jobs:'job', vehicle:'vehicle', rental:'rent', shopping:'shopping' };
-      // Classifieds item.type → unified admin CRUD resource name. Drives the
-      // verify/delete buttons so every catalog item targets the right table —
-      // even on the mixed "All" tab, where the resource is resolved per item.
-      const TYPE_TO_RESOURCE = { birthday:'birthdays', anniversary:'marriage-anniversary', marriage:'marriages', whoiswho:'whoiswho', event:'events', job:'jobs', vehicle:'carsales', rent:'houserental', shopping:'shopping' };
-      const resourceForType = (t) => TYPE_TO_RESOURCE[String(t || '').toLowerCase()] || null;
+      // Classifieds item.type → { admin CRUD resource, feed id prefix }. Drives
+      // the verify/delete buttons so every catalog item targets the right table
+      // — even on the mixed "All" tab, where it's resolved per item. The feed
+      // (classifieds_feed.py) prefixes ids per type (sh22, cs27, bdced73154…),
+      // but the admin CRUD routes match the raw table id, so we strip the prefix.
+      const TYPE_META = {
+        birthday:    { resource:'birthdays',            prefix:'bd' },
+        anniversary: { resource:'marriage-anniversary', prefix:'an' },
+        marriage:    { resource:'marriages',            prefix:'mr' },
+        whoiswho:    { resource:'whoiswho',             prefix:'ww' },
+        event:       { resource:'events',               prefix:'ev' },
+        job:         { resource:'jobs',                 prefix:'jb' },
+        vehicle:     { resource:'carsales',             prefix:'cs' },
+        rent:        { resource:'houserental',          prefix:'hr' },
+        shopping:    { resource:'shopping',             prefix:'sh' },
+      };
+      const resourceForType = (t) => (TYPE_META[String(t || '').toLowerCase()] || {}).resource || null;
+      // Strip the feed's per-type prefix to recover the raw table id the admin
+      // API expects. Falls back to the id as-is when it doesn't carry the prefix.
+      const rawIdForType = (t, id) => {
+        const meta = TYPE_META[String(t || '').toLowerCase()];
+        const s = String(id == null ? '' : id);
+        return (meta && s.startsWith(meta.prefix)) ? s.slice(meta.prefix.length) : s;
+      };
       const isNewsCat = reportCategory === 'news';
       const isClassifiedsCat = Object.prototype.hasOwnProperty.call(CLASSIFIEDS_CAT_TYPE, reportCategory);
       const isFeedCat = Object.prototype.hasOwnProperty.call(FEED_ENDPOINT, reportCategory);
@@ -1885,6 +1964,13 @@ function AdminDashboardScreen({ onBack }) {
             )}
             {visibleClassifieds.map((it,i) => {
               const img = Array.isArray(it.images) && it.images[0] ? it.images[0] : null;
+              // Unified admin CRUD wiring — resource resolved per item by type so
+              // it works on the mixed "All" tab too. `verified` now ships on every
+              // classifieds card (classifieds_feed.py).
+              const cres = resourceForType(it.type);
+              const crawId = rawIdForType(it.type, it.id); // raw table id for the admin API
+              const cverified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
+              const cbusy = crudBusy === `${cres}:${it.id}`;
               return (
                 <div key={it.id || i} style={{...cardS, display:'flex', gap:11, alignItems:'flex-start'}}>
                   {img
@@ -1896,7 +1982,10 @@ function AdminDashboardScreen({ onBack }) {
                         display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
                         {it.title || it.name || '(untitled)'}
                       </div>
-                      {it.badge && <span style={{flexShrink:0}}><Chip txt={it.badge} c="#8B5CF6" /></span>}
+                      <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end',flexShrink:0}}>
+                        {cres && <Chip txt={cverified ? 'Verified' : 'Unverified'} c={cverified ? '#10B981' : '#F59E0B'} />}
+                        {it.badge && <Chip txt={it.badge} c="#8B5CF6" />}
+                      </div>
                     </div>
                     {it.desc && <div style={{fontSize:11.5,color:T.textMuted,lineHeight:1.45,marginBottom:5,
                       display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{it.desc}</div>}
@@ -1910,6 +1999,17 @@ function AdminDashboardScreen({ onBack }) {
                       <Chip txt={it.cat || it.type || activeCat.label} c="#3B82F6" />
                       {Array.isArray(it.images) && it.images.length > 1 && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🖼 {it.images.length}</span>}
                     </div>
+                    {/* Unified admin CRUD — Accept (verify=true) / Reject (verify=false) / Delete */}
+                    {cres && (
+                      <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                        <button onClick={()=>!cverified && !cbusy && verifyRecord(cres, crawId, true, reportCategory, it.id)} disabled={cverified || cbusy}
+                          style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:(cverified||cbusy)?'default':'pointer',opacity:(cverified||cbusy)?0.45:1}}>✅ Accept</button>
+                        <button onClick={()=>cverified && !cbusy && verifyRecord(cres, crawId, false, reportCategory, it.id)} disabled={!cverified || cbusy}
+                          style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:(cverified&&!cbusy)?'pointer':'default',opacity:(cverified&&!cbusy)?1:0.45}}>❌ Reject</button>
+                        <button onClick={()=>!cbusy && deleteRecord(cres, crawId, reportCategory, it.id)} disabled={cbusy}
+                          style={{fontSize:11,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:cbusy?'default':'pointer',opacity:cbusy?0.5:1}}>🗑 Delete</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -1935,7 +2035,11 @@ function AdminDashboardScreen({ onBack }) {
               const vids = Array.isArray(it.videos) ? it.videos.filter(Boolean) : [];
               const isVeg = reportCategory === 'veg';
               const isVoice = reportCategory === 'voice';
+              const isTalent = reportCategory === 'talent';
               const verified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
+              const tbusy = crudBusy === `talent:${it.id}`;
+              // /api/feed/talent prefixes ids as "talent<id>" — strip it for the admin API.
+              const trawId = String(it.id == null ? '' : it.id).replace(/^talent/, '');
               const durSec = typeof it.durationSeconds === 'number' ? it.durationSeconds
                 : (typeof it.duration_seconds === 'number' ? it.duration_seconds : null);
               return (
@@ -1950,7 +2054,7 @@ function AdminDashboardScreen({ onBack }) {
                         {it.title || it.issue_name || it.name || '(untitled)'}
                       </div>
                       <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end',flexShrink:0}}>
-                        {isVoice && <Chip txt={verified ? 'Verified' : 'Unverified'} c={verified ? '#10B981' : '#F59E0B'} />}
+                        {(isVoice || isTalent) && <Chip txt={verified ? 'Verified' : 'Unverified'} c={verified ? '#10B981' : '#F59E0B'} />}
                         {st && <Chip txt={st} c={sc} />}
                       </div>
                     </div>
@@ -1988,6 +2092,17 @@ function AdminDashboardScreen({ onBack }) {
                           style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:verified?'pointer':'default',opacity:verified?1:0.45}}>❌ Reject</button>
                         <button onClick={()=>deleteVoice(it.id)}
                           style={{fontSize:11,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                      </div>
+                    )}
+                    {/* Talent — unified admin CRUD: Accept (verify=true) / Reject (verify=false) / Delete */}
+                    {isTalent && (
+                      <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                        <button onClick={()=>!verified && !tbusy && verifyRecord('talent', trawId, true, 'talent', it.id)} disabled={verified || tbusy}
+                          style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:(verified||tbusy)?'default':'pointer',opacity:(verified||tbusy)?0.45:1}}>✅ Accept</button>
+                        <button onClick={()=>verified && !tbusy && verifyRecord('talent', trawId, false, 'talent', it.id)} disabled={!verified || tbusy}
+                          style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:(verified&&!tbusy)?'pointer':'default',opacity:(verified&&!tbusy)?1:0.45}}>❌ Reject</button>
+                        <button onClick={()=>!tbusy && deleteRecord('talent', trawId, 'talent', it.id)} disabled={tbusy}
+                          style={{fontSize:11,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:tbusy?'default':'pointer',opacity:tbusy?0.5:1}}>🗑 Delete</button>
                       </div>
                     )}
                   </div>
