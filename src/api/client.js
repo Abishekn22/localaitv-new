@@ -51,6 +51,7 @@ const ROUTES = {
   // The main backend at localaitv.com doesn't have these routes and would
   // 404, causing the UI to fall back to hardcoded TRAIN_FALLBACK / VEG_FALLBACK.
   '/utility':        'aiservices',
+  '/admin':          'aiservices',  // unified admin CRUD over all bulletin resources (verify / delete)
   // Add new endpoint prefixes here, e.g.:
   //   '/forms':  'aiservices',
   //   '/upload': 'aiservices'

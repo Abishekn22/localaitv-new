@@ -1688,6 +1688,11 @@ function AdminDashboardScreen({ onBack }) {
       // Routing: News → /webhooks/reports · classifieds tabs → /api/classifieds (by type)
       // · the rest (veg/talent/voice/guest) have no GET feed yet → placeholder.
       const CLASSIFIEDS_CAT_TYPE = { all:null, birthday:'birthday', anniversary:'anniversary', marriage:'marriage', whoiswho:'whoiswho', events:'event', jobs:'job', vehicle:'vehicle', rental:'rent', shopping:'shopping' };
+      // Classifieds item.type → unified admin CRUD resource name. Drives the
+      // verify/delete buttons so every catalog item targets the right table —
+      // even on the mixed "All" tab, where the resource is resolved per item.
+      const TYPE_TO_RESOURCE = { birthday:'birthdays', anniversary:'marriage-anniversary', marriage:'marriages', whoiswho:'whoiswho', event:'events', job:'jobs', vehicle:'carsales', rent:'houserental', shopping:'shopping' };
+      const resourceForType = (t) => TYPE_TO_RESOURCE[String(t || '').toLowerCase()] || null;
       const isNewsCat = reportCategory === 'news';
       const isClassifiedsCat = Object.prototype.hasOwnProperty.call(CLASSIFIEDS_CAT_TYPE, reportCategory);
       const isFeedCat = Object.prototype.hasOwnProperty.call(FEED_ENDPOINT, reportCategory);
