@@ -4,7 +4,12 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 import { SuccessScreen, FormHeader, FSection, FLabel, FCard, SubmitBtn } from './../../components/Form/FormElements.jsx';
 
 function VegPriceForm({ onBack }) {
-  const today = new Date().toISOString().split('T')[0];
+  // LOCAL today (not toISOString()/UTC, which is the previous day for part of
+  // the day in IST and shifted the default/limit date off by one).
+  const today = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  })();
   const [state,    setState]   = useState('');
   const [district, setDistrict]= useState('');
   const [date,     setDate]    = useState(today);

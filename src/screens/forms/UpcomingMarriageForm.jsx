@@ -8,6 +8,12 @@ function UpcomingMarriageForm({ onBack }) {
   const [groomName,    setGroomName]    = useState('');
   const [brideName,    setBrideName]    = useState('');
   const [marriageDate, setMarriageDate] = useState('');
+  // LOCAL today for the date min (toISOString()/UTC is the previous day for part
+  // of the day in IST, which wrongly blocked selecting today's date).
+  const todayLocal = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  })();
   const [hour,         setHour]         = useState('');     // 1-12
   const [minute,       setMinute]       = useState('');     // 00, 05, ... 55
   const [ampm,         setAmPm]         = useState('AM');   // AM/PM
@@ -179,7 +185,7 @@ function UpcomingMarriageForm({ onBack }) {
             <FLabel required>Marriage Date</FLabel>
             <input type="date" value={marriageDate}
               onChange={e=>setMarriageDate(e.target.value)}
-              min={new Date().toISOString().split('T')[0]}
+              min={todayLocal}
               style={{width:'100%',border:`1.5px solid ${errors.marriageDate?T.red:T.inputBorder}`,
                 borderRadius:10,padding:'12px 14px',fontSize:14,color:T.text,
                 background:T.inputBg,boxSizing:'border-box'}}/>

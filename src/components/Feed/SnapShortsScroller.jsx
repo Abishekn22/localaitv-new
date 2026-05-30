@@ -43,8 +43,14 @@ function SnapShortsScroller({ total, initialIdx = 0, resetKey, renderItem, onInd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, resetKey, total]);
 
-  // Category (resetKey) change → back to the top of the new list.
-  useEffect(() => { setIdx(0); }, [resetKey]);
+  // Category (resetKey) change → back to the top of the new list. Skip the
+  // initial mount, otherwise this would clobber `initialIdx` and always snap
+  // the feed to item 0 (which made a tapped clip open on the first video).
+  const didMountReset = useRef(false);
+  useEffect(() => {
+    if (!didMountReset.current) { didMountReset.current = true; return; }
+    setIdx(0);
+  }, [resetKey]);
 
   // Detect when a scroll has settled on a snapped slide, then advance the
   // logical index and recenter. scroll-snap guarantees we land on a boundary,

@@ -90,11 +90,8 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   const displayState        = userState        || 'AP';
 
   // ── LIVE API FEEDS — auto-refresh every 5 min ─────────────
-  // Backend contract (Nagarjuna):
-  //   GET /api/news?constituency=Kurnool&limit=20
-  //   Response: { items: [{ id, title, summary, link, thumbnail, source, cat, time, live, ... }] }
-  //   Sources: RSS feeds (Eenadu, Sakshi, TV9 etc.) + govt feeds + citizen reporters
-  //   See: Zero_Risk_News_Plan.md for full spec
+  // (The /api/news feed was removed from the project; Top Stories renders the
+  //  static NEWS_ITEMS set. Bulletins and incidents below are still live.)
   const [refreshTick, setRefreshTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setRefreshTick(v => v + 1), 5 * 60 * 1000); // 5 min
@@ -165,11 +162,8 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   );
   const locParam = activeLocationId != null ? `&location_id=${activeLocationId}` : '';
 
-  const { data: liveNews, loading: newsLoading, error: newsError } = useAPI(
-    () => apiCall(`/news?constituency=${encodeURIComponent(displayConstituency)}&limit=20`).then(d => d.items || d),
-    NEWS_ITEMS,
-    [displayConstituency, refreshTick]
-  );
+  // The /news API was removed from the project — Top Stories now renders the
+  // static NEWS_ITEMS set (see newsToShow below).
   // /api/bulletins — paginated bulletin board (id, title, content, timestamp,
   // priority_level, image_url, audio_url, video_url). The backend returns
   // location_id: 0 for every bulletin, so we fetch all and filter by the
@@ -214,16 +208,13 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     uploadedAt: it?.created_at || null,
   });
 
-  const newsToShow     = (Array.isArray(liveNews)     && liveNews.length     > 0) ? liveNews     : NEWS_ITEMS;
+  const newsToShow     = NEWS_ITEMS;
   const bulletinsToShow= (Array.isArray(liveBulletins) && liveBulletins.length > 0)
     ? filterBulletinsByLocation(liveBulletins, { id: activeLocationId, name: activeChannel?.name, nameEn: activeChannel?.nameEn }).map(mapBulletin)
     : BULLETINS;
   const incidentShorts = (Array.isArray(liveIncidents) && liveIncidents.length > 0)
     ? liveIncidents.map(mapIncidentToShort)
     : null;
-
-  // Track if showing live data or fallback
-  const isLiveData = Array.isArray(liveNews) && liveNews.length > 0;
 
   // Pulse viewer count every 5 seconds
   useEffect(() => {

@@ -22,6 +22,14 @@ function BirthdayRequestForm({ onBack }) {
   // Auto-calculate age from DOB
   const age = dob ? Math.floor((Date.now() - new Date(dob)) / (365.25*24*3600*1000)) : null;
 
+  // Max selectable DOB = LOCAL today. Using toISOString() here would give the
+  // UTC date, which in IST (UTC+5:30) is the previous day for part of the day —
+  // that wrongly disabled today's date (e.g. couldn't pick the 31st on the 31st).
+  const todayLocal = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  })();
+
   function updateWisher(i, field, val) {
     const next = [...wishers];
     next[i] = { ...next[i], [field]: val };
@@ -126,7 +134,7 @@ function BirthdayRequestForm({ onBack }) {
           <div style={{marginTop:12}}>
             <FLabel required>Date of Birth</FLabel>
             <input type="date" value={dob} onChange={e=>setDob(e.target.value)}
-              max={new Date().toISOString().split('T')[0]}
+              max={todayLocal}
               style={{width:'100%',border:`1.5px solid ${errors.dob?T.red:T.inputBorder}`,
                 borderRadius:10,padding:'12px 14px',fontSize:14,color:T.text,
                 background:T.inputBg,boxSizing:'border-box'}}/>

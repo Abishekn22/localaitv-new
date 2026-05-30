@@ -435,13 +435,15 @@ function App() {
         } else {
           pvItems = CLASSIFIEDS.filter(c => c.cat === 'Public Voice' && c.ytId).map(publicVoiceToShortShape);
         }
-        let startIdx = 0;
+        // Hand the tapped clip's id to the viewer and let it resolve the start
+        // position AFTER its internal sort — computing an index here (against the
+        // unsorted list) lands on the wrong/first video once the viewer re-sorts.
+        let startId = null;
         if (typeof window !== 'undefined' && window.__publicVoiceStartId != null) {
-          const ix = pvItems.findIndex(c => String(c.id) === String(window.__publicVoiceStartId));
-          if (ix >= 0) startIdx = ix;
+          startId = window.__publicVoiceStartId;
           window.__publicVoiceStartId = null;
         }
-        return <KurnoolShortsScreen rawItems={pvItems} initialIdx={startIdx} onClose={()=>navigate('home')}/>;
+        return <KurnoolShortsScreen rawItems={pvItems} initialId={startId} onClose={()=>navigate('home')}/>;
       }
       case 'classifiedsfeed': {
         // Allow other rails (e.g. ClassifiedsSection thumbnails) to

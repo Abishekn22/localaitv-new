@@ -6,13 +6,29 @@ import ShortsShareSheet from './../components/Feed/ShortsShareSheet.jsx';
 import { sortShortsForFeed, getLoopIdx } from './../components/Feed/UnifiedFeedViewer.jsx';
 import SnapShortsScroller from './../components/Feed/SnapShortsScroller.jsx';
 
-function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
+function KurnoolShortsScreen({ onClose, initialIdx = 0, initialItem = null, initialId = null, rawItems }) {
   const { T }   = useAppTheme();
   // Sort by date/time: today first (latest), then yesterday, etc.
   const sorted  = useMemo(() => sortShortsForFeed(rawItems || SHORT_NEWS), [rawItems]);
   const total   = sorted.length;
 
-  const [curIdx,    setCurIdx]    = useState(initialIdx); // live looped index (share target)
+  // Resolve which clip to open AFTER the internal sort, so a tap lands on the
+  // EXACT video the user clicked (not index 0). Prefer the clicked item by
+  // object identity (robust even when items lack or share ids), then by id,
+  // then fall back to the raw index passed in.
+  const startIdx = useMemo(() => {
+    if (initialItem != null) {
+      const i = sorted.indexOf(initialItem);
+      if (i >= 0) return i;
+    }
+    if (initialId != null) {
+      const i = sorted.findIndex(it => it && it.id != null && String(it.id) === String(initialId));
+      if (i >= 0) return i;
+    }
+    return initialIdx || 0;
+  }, [sorted, initialItem, initialId, initialIdx]);
+
+  const [curIdx,    setCurIdx]    = useState(startIdx); // live looped index (share target)
   const [showShare, setShowShare] = useState(false);
 
   const idx = total > 0 ? getLoopIdx(curIdx, total) : 0;
@@ -83,7 +99,7 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, rawItems }) {
       <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
         <SnapShortsScroller
           total={total}
-          initialIdx={initialIdx}
+          initialIdx={startIdx}
           onIndexChange={setCurIdx}
           renderItem={(itemIndex, isActive) => {
             const item = sorted[itemIndex];

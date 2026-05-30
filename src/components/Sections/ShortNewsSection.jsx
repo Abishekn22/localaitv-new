@@ -3,7 +3,6 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import KurnoolShortsScreen from './../../screens/KurnoolShortsScreen.jsx';
 import SectionAccentBar from './../SectionAccentBar.jsx';
-import { sortShortsForFeed } from './../Feed/UnifiedFeedViewer.jsx';
 
 // ── SHORT NEWS SECTION COMPONENT (with auto-scroll) ─────────
 // `items` (optional) — live incident-derived shorts from /api/incidents,
@@ -12,6 +11,7 @@ import { sortShortsForFeed } from './../Feed/UnifiedFeedViewer.jsx';
 function ShortNewsSection({ channel, items: liveItems }) {
   const { T } = useAppTheme();
   const [openIdx,    setOpenIdx]    = useState(null);
+  const [openItem,   setOpenItem]   = useState(null); // the exact clip tapped (resolved by identity in the viewer)
   const [showFeed,   setShowFeed]   = useState(false);
   const scrollRef  = useRef(null);
   const [paused, setPaused] = useState(false);
@@ -53,7 +53,7 @@ function ShortNewsSection({ channel, items: liveItems }) {
             }}>Shorts</span>
           </div>
         </div>
-        <span onClick={() => setOpenIdx(0)}
+        <span onClick={() => { setOpenItem(null); setOpenIdx(0); }}
           style={{ fontSize:11, color:T.red, fontWeight:600, cursor:'pointer', flexShrink:0 }}>See all →</span>
       </div>
 
@@ -67,16 +67,13 @@ function ShortNewsSection({ channel, items: liveItems }) {
       >
         {items.map((s, i) => (
           <div key={i} onClick={() => {
-              // Viewer renders items sorted by uploadedAt (newest first). To open
-              // the SAME clip the user tapped, resolve its position in the sorted
-              // feed by object identity — not by `id`, since live items may share
-              // or lack ids, which made findIndex always return 0 (first short).
-              // `items` is the source list doubled, so `i % total` is the real
-              // source index.
+              // The viewer re-sorts by uploadedAt internally, so we hand it the
+              // EXACT tapped object and let it resolve the position by identity
+              // (`items` is the source list doubled, so `i % total` is the real
+              // source index). This is robust even when live items lack/share ids.
               const srcItem = source[i % total];
-              const sortedFeed = sortShortsForFeed(source);
-              const realIdx = sortedFeed.indexOf(srcItem);
-              setOpenIdx(realIdx >= 0 ? realIdx : 0);
+              setOpenItem(srcItem);
+              setOpenIdx(i % total);
             }}
             style={{ flexShrink:0, width:108, cursor:'pointer', position:'relative' }}>
             {/* Clean 9:16 thumbnail — no text overlays, no dark gradient.
@@ -128,8 +125,9 @@ function ShortNewsSection({ channel, items: liveItems }) {
       {openIdx !== null && (
         <KurnoolShortsScreen
           rawItems={source}
+          initialItem={openItem}
           initialIdx={openIdx || 0}
-          onClose={() => setOpenIdx(null)}
+          onClose={() => { setOpenIdx(null); setOpenItem(null); }}
         />
       )}
     </div>
