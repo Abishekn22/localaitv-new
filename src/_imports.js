@@ -40,4 +40,4 @@ export {
 } from './data/maps.js';
 export { css } from './data/helpers.js';
 
-export { genId, genComplianceId, uploadPhotos } from './components/Form/formHelpers.js';
+export { genId, genComplianceId, uploadPhotos, getUserLocationId } from './components/Form/formHelpers.js';

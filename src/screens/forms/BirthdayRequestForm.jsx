@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css, genId, uploadPhotos } from '../../_imports.js';
+import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css, genId, uploadPhotos, getUserLocationId } from '../../_imports.js';
 
 import { SuccessScreen, FormHeader, FCard, FLabel, FInput, SubmitBtn } from './../../components/Form/FormElements.jsx';
 
@@ -60,23 +60,40 @@ function BirthdayRequestForm({ onBack }) {
         photo_uris: i === 0 ? wisherUrls : [],
       }));
 
-      await fetch(`${API}/birthday-requests`, {
+      const buildBody = (locId) => JSON.stringify({
+        request_id: reqId, location_id: locId,
+        full_name: fullName,
+        date_of_birth: dob,
+        age_calculated: age,
+        wishers: wishersOut,
+        scheduled_by_dob: true,
+        status: 'Pending Review',
+        photo_uris: recipientUrls,
+      });
+      const post = (body) => fetch(`${API}/birthday-requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          request_id: reqId,
-          full_name: fullName,
-          date_of_birth: dob,
-          age_calculated: age,
-          wishers: wishersOut,
-          scheduled_by_dob: true,
-          status: 'Pending Review',
-          photo_uris: recipientUrls,
-        }),
+        body,
       });
-      setSuccess(reqId);
+      let res = await post(buildBody(getUserLocationId()));
+      let _d = await res.json().catch(() => null);
+      // Stale dev location_id cached in localStorage → prod returns 404
+      // "Unknown location_id". Drop the bad id and retry with null.
+      if (!res.ok && res.status === 404 && _d && /Unknown location_id/i.test(_d.detail || _d.message || '')) {
+        try {
+          const u = JSON.parse(localStorage.getItem('localaitv.auth.user') || 'null');
+          if (u && (u.location != null || u.location_id != null)) {
+            delete u.location; delete u.location_id;
+            localStorage.setItem('localaitv.auth.user', JSON.stringify(u));
+          }
+        } catch {}
+        res = await post(buildBody(null));
+        _d = await res.json().catch(() => null);
+      }
+      if (!res.ok) throw new Error((_d && (_d.message || _d.error || _d.detail)) || ('Submission failed (' + res.status + ')'));
+      setSuccess((_d && _d.request_id) || reqId);
     } catch (e) {
-      setApiError('Submission failed. Please check your connection and try again.');
+      setApiError(e.message || 'Submission failed. Please check your connection and try again.');
     }
     setLoading(false);
   }
