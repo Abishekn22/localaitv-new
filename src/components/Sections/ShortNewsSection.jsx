@@ -67,11 +67,15 @@ function ShortNewsSection({ channel, items: liveItems }) {
       >
         {items.map((s, i) => (
           <div key={i} onClick={() => {
-              // Viewer renders items sorted by uploadedAt (newest first).
-              // To open the SAME clip the user tapped, look up its position
-              // in the sorted feed by id and pass that as the initial index.
+              // Viewer renders items sorted by uploadedAt (newest first). To open
+              // the SAME clip the user tapped, resolve its position in the sorted
+              // feed by object identity — not by `id`, since live items may share
+              // or lack ids, which made findIndex always return 0 (first short).
+              // `items` is the source list doubled, so `i % total` is the real
+              // source index.
+              const srcItem = source[i % total];
               const sortedFeed = sortShortsForFeed(source);
-              const realIdx = sortedFeed.findIndex(x => x.id === s.id);
+              const realIdx = sortedFeed.indexOf(srcItem);
               setOpenIdx(realIdx >= 0 ? realIdx : 0);
             }}
             style={{ flexShrink:0, width:108, cursor:'pointer', position:'relative' }}>
@@ -154,33 +158,32 @@ function publicVoiceToShortShape(pv) {
   // Strip the trailing "\n\n📍 ..." block from desc — that info already
   // lives in pv.location / pv.phone and is rendered separately
   const cleanDesc = (pv.desc || '').split(/\n\n📍/)[0].trim();
+  // Accept both the static shape and the live API shape (videos[], issue_name, …).
+  const vid = pv.mediaUrl || pv.video_url || (Array.isArray(pv.videos) && pv.videos[0]) || '';
+  const dur = pv.duration || (typeof pv.duration_seconds === 'number' && pv.duration_seconds > 0
+    ? `${Math.floor(pv.duration_seconds / 60)}:${String(pv.duration_seconds % 60).padStart(2, '0')}` : null);
   return {
     id:          pv.id,
-    mediaUrl:    pv.mediaUrl || pv.video_url || '',
+    mediaUrl:    vid,
     orientation: pv.orientation || 'vertical',
-    titleTe:     pv.title || '',
+    titleTe:     pv.title || pv.issue_name || '',
     titleEn:     '',
-    fullText:    cleanDesc,
+    fullText:    cleanDesc || pv.issue_name || '',
     channel:     'పబ్లిక్ వాయిస్',
-    reporter:    pv.uploaderName || '',
+    reporter:    pv.uploaderName || pv.uploader_name || '',
     profilePhoto: pv.uploaderPhoto || '',
-    location:    pv.location || '',
+    location:    pv.location || pv.constituency || '',
     category:    'Public Voice',
     views:       '',
-    duration:    pv.duration || null,
+    duration:    dur,
     live:        false,
     uploadDate:  pv.date || '',
     uploadTime:  pv.time || '',
-<<<<<<< Updated upstream
-    img:         safeImageUrl((pv.images && pv.images[0]) || pv.thumbnail),
-=======
-    img:         (pv.images && pv.images[0]) || pv.thumbnail || '',
-    // Forward the generated-bulletin URL (if any) so the thumbnail strip can
-    // render a looping preview <video> instead of the static photo.
-    previewVideo:(pv.videos && pv.videos[0]) || '',
->>>>>>> Stashed changes
+    // No static poster when there's a video — let the player show the video's
+    // own first frame instead of a default stock image.
+    img:         vid ? '' : safeImageUrl((pv.images && pv.images[0]) || pv.thumbnail),
     bg:          ['#0a0010','#3a0030'],
-    uploadedAt:  pv.uploadedAt ? new Date(pv.uploadedAt) : new Date(),
+    uploadedAt:  pv.uploadedAt ? new Date(pv.uploadedAt) : (pv.created_at ? new Date(pv.created_at) : new Date()),
   };
 }
 

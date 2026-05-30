@@ -4,8 +4,9 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 import ClassifiedsFeedScreen from './../../screens/ClassifiedsFeedScreen.jsx';
 import SectionAccentBar from './../SectionAccentBar.jsx';
 import { CL_CATS_TE } from './../../data/classifieds.js';
+import { publicVoiceToShortShape } from './ShortNewsSection.jsx';
 
-function ClassifiedsSection({ onNavigate, constituency, channel }) {
+function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   const { T } = useAppTheme();
   const [cat,      setCat]      = useState('All');
   const [selected, setSelected] = useState(null);
@@ -17,23 +18,56 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
     () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=30`).then(d => d.items || d),
     [], [constituency]
   );
-  // For every category the API returns live data for, use ONLY the live rows;
-  // keep the static mock for categories that have no live data yet.
-  const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
-  // TEMP DEBUG — remove once videos render correctly.
-  // Logs to browser console what /classifieds returned so we can see whether
-  // each card has a populated videos[] array.
-  if (typeof window !== 'undefined' && !window.__cl_logged) {
-    window.__cl_logged = true;
-    // eslint-disable-next-line no-console
-    console.log('[Classifieds] constituency =', constituency,
-      ' liveItems =', liveItems.length,
-      ' withVideos =', liveItems.filter(c => Array.isArray(c.videos) && c.videos[0]).length,
-      ' sample =', liveItems[0]);
-  }
-  const liveCats  = new Set(liveItems.map(c => c.cat));
-  const all = liveItems.length > 0
-    ? [...liveItems, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
+  // Public Voice — its own API. Only ADMIN-VERIFIED items, scoped to location.
+  // Uses a retrying fetch (not single-shot useAPI): on a fresh load the app
+  // mounts twice and the browser aborts in-flight requests (net::ERR_ABORTED),
+  // which would otherwise leave the Public Voice cards permanently empty. The
+  // retry mirrors PublicVoiceSection so both render the same verified set.
+  const [pvData, setPvData] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    let tries = 0;
+    const qs = locationId != null ? `location_id=${locationId}&` : '';
+    const load = () => {
+      if (!alive) return;
+      apiCall(`/public-voice-requests?${qs}limit=50`)
+        .then(d => { if (alive) setPvData((d && d.items) || (Array.isArray(d) ? d : [])); })
+        .catch(() => { if (alive && tries < 6) { tries += 1; setTimeout(load, 700); } });
+    };
+    load();
+    return () => { alive = false; };
+  }, [locationId]);
+  // Only admin-approved (verified) Public Voice videos, scoped to the selected
+  // location. Mirrors PublicVoiceSection so the catalog shows the same set.
+  const pvVerified = (Array.isArray(pvData) ? pvData : [])
+    .filter(it => it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1')
+    .filter(it => locationId == null || String(it.location_id) === String(locationId));
+  // Map verified Public Voice → classifieds-card shape so the "Public Voice"
+  // category tile renders the real uploaded video (not a static mock).
+  const pvCards = pvVerified.map(pv => ({
+    id: 'pv-' + pv.id,
+    cat: 'Public Voice',
+    type: 'publicvoice',
+    title: pv.issue_name || 'Public Voice',
+    images: (Array.isArray(pv.images) && pv.images.length) ? pv.images : [],
+    videos: Array.isArray(pv.videos) ? pv.videos.filter(Boolean) : [],
+    location: pv.location || pv.constituency || '',
+    time: pv.time || '',
+    date: pv.date || '',
+    badge: '📢 పబ్లిక్ వాయిస్',
+  }));
+
+  // Show only the SELECTED location's items: match on location_id. Null-location
+  // rows (already name-scoped by the API) are kept; any cross-location row is
+  // dropped. location_id is nullable per the API.
+  const allLive = Array.isArray(liveClassifieds) ? liveClassifieds : [];
+  const liveItems = locationId != null
+    ? allLive.filter(c => c.location_id == null || String(c.location_id) === String(locationId))
+    : allLive;
+  // Categories that now have LIVE data — their static mock is dropped.
+  const liveCats  = new Set([...liveItems.map(c => c.cat), ...(pvCards.length ? ['Public Voice'] : [])]);
+  const all = (liveItems.length > 0 || pvCards.length > 0)
+    ? [...liveItems, ...pvCards, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
     : CLASSIFIEDS;
 
   // Randomly shuffle for display on home page — memoised so it doesn't re-shuffle on every re-render
@@ -61,6 +95,16 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
   // rendering inside this section. Category + item id are stashed in
   // window flags so the route handler can land on the exact item.
   function openItem(item) {
+    // Public Voice items open in the fullscreen video viewer, not the
+    // image-based classifieds feed.
+    if (item && item.type === 'publicvoice') {
+      if (typeof window !== 'undefined') {
+        window.__publicVoiceItems   = pvVerified.map(publicVoiceToShortShape);
+        window.__publicVoiceStartId = String(item.id).replace(/^pv-/, '');
+      }
+      onNavigate && onNavigate('publicvoicefeed');
+      return;
+    }
     if (typeof window !== 'undefined') {
       window.__classifiedsStartCat    = cat;
       window.__classifiedsStartItemId = item && item.id;
@@ -160,41 +204,33 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
               onTouchStart={e=>e.currentTarget.style.transform='scale(0.97)'}
               onTouchEnd={e=>e.currentTarget.style.transform='scale(1)'}
             >
-              {/* Real category thumbnail — prefer generated bulletin video when present,
-                  fall back to the uploaded photo, then to the category placeholder.
-                  EXCEPTION: "Who is Who" always shows the photo only — no bulletin
-                  video is generated for that category and we don't want to play one
-                  even if a stray URL ever shows up in `videos`. */}
+              {/* Thumbnail — Public Voice shows the video's first frame; others the image */}
               <div style={{width:'100%',height:100,position:'relative',overflow:'hidden',
                 background:T.bg3}}>
-<<<<<<< Updated upstream
-                <img
-                  src={safeImageUrl((Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events'])}
-                  alt={cl.cat}
-                  style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}
-                  onError={e=>{ if (e.target.src.endsWith('/placeholder.svg')) return; e.target.src = '/placeholder.svg'; }}
-                />
-=======
-                {cl.cat !== 'Who is Who' && Array.isArray(cl.videos) && cl.videos[0] ? (
+                {Array.isArray(cl.videos) && cl.videos[0] ? (
                   <video
                     src={cl.videos[0]}
-                    poster={(Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']}
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    preload="metadata"
+                    muted playsInline preload="metadata"
                     style={{width:'100%',height:'100%',objectFit:'cover',display:'block',background:'#000'}}
+                    onError={e=>{ e.target.style.display='none'; }}
                   />
                 ) : (
                   <img
-                    src={(Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']}
+                    src={safeImageUrl((Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events'])}
                     alt={cl.cat}
                     style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}
-                    onError={e=>{ e.target.src = CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']; }}
+                    onError={e=>{ if (e.target.src.endsWith('/placeholder.svg')) return; e.target.src = '/placeholder.svg'; }}
                   />
                 )}
->>>>>>> Stashed changes
+                {/* Play badge for video cards */}
+                {Array.isArray(cl.videos) && cl.videos[0] && (
+                  <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
+                    width:30,height:30,borderRadius:'50%',background:'rgba(255,255,255,0.9)',
+                    display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+                    <div style={{width:0,height:0,marginLeft:2,borderTop:'6px solid transparent',
+                      borderBottom:'6px solid transparent',borderLeft:'9px solid #1A237E'}}/>
+                  </div>
+                )}
                 {/* Light gradient at bottom for text */}
                 <div style={{position:'absolute',bottom:0,left:0,right:0,height:40,
                   background:'linear-gradient(0deg,rgba(0,0,0,0.55),transparent)'}}/>

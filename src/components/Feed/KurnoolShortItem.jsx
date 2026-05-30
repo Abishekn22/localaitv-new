@@ -52,6 +52,24 @@ function KurnoolShortItem({ item, isActive, onShare, onBell }) {
     setRatingVal(0);
   }, [item?.id]);
 
+  // Make the active video actually start. Unmuted autoplay is blocked by
+  // browsers, so try with sound first, then fall back to muted playback —
+  // guaranteeing it never just sits on a black frame. Pause when not active.
+  useEffect(() => {
+    const v = videoElRef.current;
+    if (!v) return;
+    if (isActive) {
+      v.currentTime = 0;
+      const p = v.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+      }
+      setIsPlaying(true);
+    } else {
+      try { v.pause(); } catch {}
+    }
+  }, [isActive, item?.id, item?.mediaUrl]);
+
   // Defensive null-guard placed AFTER all hooks (Rules of Hooks compliant).
   // The parent screen already renders an empty state when its feed is
   // empty, but this catches any stray mount with an undefined item.

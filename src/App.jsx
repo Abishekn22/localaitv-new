@@ -426,14 +426,18 @@ function App() {
       case 'local':      return <LocalScreen onNavigate={navigate} constituency={userConstituency||'Kurnool'} onOpenCat={(c)=>{setClassifiedsCat(c); navigate('classifiedsfeed');}} />;
       case 'shortsfeed':      return <ShortsFeedRoute onClose={()=>navigate('home')} locationId={activeLocationId} />;
       case 'publicvoicefeed': {
-        // Public Voice opens in the Mana Kurnool Shorts viewer with
-        // pv-items mapped to the SHORT_NEWS shape. ONLY uploaded form
-        // data flows through the mapper — no static demo branding.
-        const pvRaw = CLASSIFIEDS.filter(c => c.cat === 'Public Voice' && c.ytId);
-        const pvItems = pvRaw.map(publicVoiceToShortShape);
+        // Prefer the LIVE, location-filtered items handed over by the home
+        // PublicVoiceSection (already mapped to the shorts shape so the real
+        // uploaded videos play). Fall back to the static demo set otherwise.
+        let pvItems;
+        if (typeof window !== 'undefined' && Array.isArray(window.__publicVoiceItems) && window.__publicVoiceItems.length) {
+          pvItems = window.__publicVoiceItems;
+        } else {
+          pvItems = CLASSIFIEDS.filter(c => c.cat === 'Public Voice' && c.ytId).map(publicVoiceToShortShape);
+        }
         let startIdx = 0;
-        if (typeof window !== 'undefined' && window.__publicVoiceStartId) {
-          const ix = pvRaw.findIndex(c => c.id === window.__publicVoiceStartId);
+        if (typeof window !== 'undefined' && window.__publicVoiceStartId != null) {
+          const ix = pvItems.findIndex(c => String(c.id) === String(window.__publicVoiceStartId));
           if (ix >= 0) startIdx = ix;
           window.__publicVoiceStartId = null;
         }

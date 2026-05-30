@@ -78,10 +78,10 @@ function AdminDashboardScreen({ onBack }) {
   }, []);
 
   // Per-category feeds (veg / talent / public-voice / guests) — lazy-loaded.
-  const FEED_ENDPOINT = { veg: '/feed/vegetables', talent: '/feed/talent', voice: '/feed/public-voice', guest: '/feed/guests' };
+  const FEED_ENDPOINT = { veg: '/feed/vegetables', talent: '/feed/talent', voice: '/public-voice-requests', guest: '/feed/guests' };
   const [feedData, setFeedData] = useState({}); // catKey -> { items, loading, err, loaded }
   const loadFeed = useCallback(async (catKey) => {
-    const path = ({ veg:'/feed/vegetables', talent:'/feed/talent', voice:'/feed/public-voice', guest:'/feed/guests' })[catKey];
+    const path = ({ veg:'/feed/vegetables', talent:'/feed/talent', voice:'/public-voice-requests', guest:'/feed/guests' })[catKey];
     if (!path) return;
     setFeedData(prev => ({ ...prev, [catKey]: { ...(prev[catKey] || {}), loading: true, err: '' } }));
     try {
@@ -93,6 +93,46 @@ function AdminDashboardScreen({ onBack }) {
         ? 'This feed isn’t available on the server yet (404) — deploy the endpoint to populate this tab.'
         : (e.message || 'Failed to load');
       setFeedData(prev => ({ ...prev, [catKey]: { items: [], loading: false, err: msg, loaded: true } }));
+    }
+  }, []);
+
+  // Accept (verify) / Reject (un-verify) a public-voice submission.
+  const verifyVoice = useCallback(async (id, verified) => {
+    try {
+      const d = await apiCall(`/public-voice-requests/${id}/verify`, {
+        method: 'PATCH',
+        body: JSON.stringify({ verified }),
+      });
+      const updated = d && d.item ? d.item : { verified };
+      setFeedData(prev => {
+        const cur = prev.voice;
+        if (!cur) return prev;
+        return { ...prev, voice: { ...cur, items: (cur.items || []).map(it => String(it.id) === String(id) ? { ...it, ...updated } : it) } };
+      });
+    } catch (e) {
+      alert(String(e.message) === '404'
+        ? 'Verify endpoint not found (404) — PATCH /api/public-voice-requests/:id/verify isn’t deployed on the server yet.'
+        : (e.message || 'Failed to update verification'));
+    }
+  }, []);
+
+  // Permanently delete a public-voice submission.
+  const deleteVoice = useCallback(async (id) => {
+    if (!window.confirm('Delete this public-voice submission permanently?')) return;
+    try {
+      await apiCall(`/public-voice-requests/${id}`, { method: 'DELETE' });
+      setFeedData(prev => {
+        const cur = prev.voice;
+        if (!cur) return prev;
+        return { ...prev, voice: { ...cur, items: (cur.items || []).filter(it => String(it.id) !== String(id)) } };
+      });
+    } catch (e) {
+      const code = String(e.message);
+      alert(code === '405'
+        ? 'Delete not available yet (405) — DELETE /api/public-voice-requests/:id isn’t deployed on the server.'
+        : code === '404'
+          ? 'Already deleted or not found (404).'
+          : (e.message || 'Failed to delete'));
     }
   }, []);
 
@@ -1864,11 +1904,15 @@ function AdminDashboardScreen({ onBack }) {
             )}
             {feedItems.map((it,i) => {
               const img = it.image || (Array.isArray(it.images) && it.images[0]) || null;
-              const sub = it.role || it.eventName || it.uploaderName || it.performerName || it.issueName || '';
+              const sub = it.role || it.eventName || it.uploaderName || it.uploader_name || it.performerName || it.issueName || it.issue_name || '';
               const st = String(it.status || '').trim();
               const sc = /pending/i.test(st) ? '#F59E0B' : /approv|publish/i.test(st) ? '#10B981' : /reject/i.test(st) ? '#EF4444' : '#6B7280';
               const vids = Array.isArray(it.videos) ? it.videos.filter(Boolean) : [];
               const isVeg = reportCategory === 'veg';
+              const isVoice = reportCategory === 'voice';
+              const verified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
+              const durSec = typeof it.durationSeconds === 'number' ? it.durationSeconds
+                : (typeof it.duration_seconds === 'number' ? it.duration_seconds : null);
               return (
                 <div key={it.id || i} style={{...cardS, display:'flex', gap:11, alignItems:'flex-start'}}>
                   {img
@@ -1878,9 +1922,12 @@ function AdminDashboardScreen({ onBack }) {
                     <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:3}}>
                       <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,
                         display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-                        {it.title || it.name || '(untitled)'}
+                        {it.title || it.issue_name || it.name || '(untitled)'}
                       </div>
-                      {st && <span style={{flexShrink:0}}><Chip txt={st} c={sc} /></span>}
+                      <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end',flexShrink:0}}>
+                        {isVoice && <Chip txt={verified ? 'Verified' : 'Unverified'} c={verified ? '#10B981' : '#F59E0B'} />}
+                        {st && <Chip txt={st} c={sc} />}
+                      </div>
                     </div>
                     {sub && <div style={{fontSize:11.5,color:T.textMuted,marginBottom:5,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{sub}</div>}
                     <div style={{fontSize:11,color:T.textMuted,display:'flex',gap:10,flexWrap:'wrap',marginBottom:6}}>
@@ -1889,7 +1936,7 @@ function AdminDashboardScreen({ onBack }) {
                       {it.time && <span>🕐 {it.time}</span>}
                       {it.phone && <span>📞 {it.phone}</span>}
                       {it.education && <span>🎓 {it.education}</span>}
-                      {typeof it.durationSeconds === 'number' && it.durationSeconds > 0 && <span>⏱ {it.durationSeconds}s</span>}
+                      {typeof durSec === 'number' && durSec > 0 && <span>⏱ {durSec}s</span>}
                     </div>
                     {/* Veg price board preview */}
                     {isVeg && Array.isArray(it.prices) && it.prices.length > 0 && (
@@ -1907,6 +1954,17 @@ function AdminDashboardScreen({ onBack }) {
                       {isVeg && typeof it.count === 'number' && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🥦 {it.count} items</span>}
                       {vids.length > 0 && <a href={vids[0]} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.35)',borderRadius:6,padding:'3px 7px',textDecoration:'none'}}>🎬 Video</a>}
                     </div>
+                    {/* Public Voice — Accept (verify=true) / Reject (verify=false) */}
+                    {isVoice && (
+                      <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                        <button onClick={()=>!verified && verifyVoice(it.id, true)} disabled={verified}
+                          style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:verified?'default':'pointer',opacity:verified?0.45:1}}>✅ Accept</button>
+                        <button onClick={()=>verified && verifyVoice(it.id, false)} disabled={!verified}
+                          style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:8,padding:'7px 12px',cursor:verified?'pointer':'default',opacity:verified?1:0.45}}>❌ Reject</button>
+                        <button onClick={()=>deleteVoice(it.id)}
+                          style={{fontSize:11,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 12px',cursor:'pointer'}}>🗑 Delete</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

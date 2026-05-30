@@ -15,7 +15,7 @@ import PublicVoiceSection from './../components/Sections/PublicVoiceSection.jsx'
 import SectionAccentBar from './../components/SectionAccentBar.jsx';
 import UnifiedFeedViewer from './../components/Feed/UnifiedFeedViewer.jsx';
 import UploadCtaBanner from './../components/Sections/UploadCtaBanner.jsx';
-import { LocationPin, LiveDot, FooterLink } from './../components/atoms.jsx';
+import { LocationPin, LiveDot, FooterLink, SkeletonBox } from './../components/atoms.jsx';
 import { ShortNewsSection } from './../components/Sections/ShortNewsSection.jsx';
 import { useAuth } from './../contexts/AuthContext.jsx';
 import { useNotifications, formatNotifTime } from './../contexts/NotificationContext.jsx';
@@ -1346,7 +1346,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
 
         {/* ── CLASSIFIEDS (Kurnool Local) — moved to top per request ─ */}
         <Reveal delay={0.05}>
-          <ClassifiedsSection onNavigate={onNavigate} constituency={displayConstituency} channel={activeChannel} />
+          <ClassifiedsSection onNavigate={onNavigate} constituency={displayConstituency} channel={activeChannel} locationId={activeLocationId} />
         </Reveal>
 
         {/* Section gap */}
@@ -1433,7 +1433,7 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
 
         {/* ── KURNOOL పబ్లిక్ వాయిస్ (Shorts-style auto-scroll rail) ── */}
         <Reveal delay={0.05}>
-          <PublicVoiceSection onNavigate={onNavigate} channel={activeChannel} />
+          <PublicVoiceSection onNavigate={onNavigate} channel={activeChannel} locationId={activeLocationId} />
         </Reveal>
 
         {/* Section gap */}
@@ -1512,6 +1512,30 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
             scrollbarWidth:'none',
             WebkitOverflowScrolling:'touch',
           }}>
+
+            {/* First load — incidents still fetching and nothing to show yet.
+                Render shimmer placeholders shaped like the lead + secondary
+                cards so the rail reserves its height instead of jumping. */}
+            {filteredHome.length === 0 && incidentsLoading && (
+              <>
+                <div style={{ padding:'14px 0 16px', borderBottom:`1px solid ${T.border}` }}>
+                  <SkeletonBox style={{ width:120, height:10, borderRadius:5, marginBottom:10 }} />
+                  <SkeletonBox style={{ width:'100%', paddingBottom:'56.25%', height:0, borderRadius:OTT.radius.md }} />
+                  <SkeletonBox style={{ width:'95%', height:14, borderRadius:6, marginTop:12 }} />
+                  <SkeletonBox style={{ width:'70%', height:14, borderRadius:6, marginTop:7 }} />
+                </div>
+                {Array.from({ length:4 }).map((_, i) => (
+                  <div key={`ts-sk-${i}`} style={{ display:'flex', gap:12, padding:'12px 0', borderBottom:`1px solid ${T.border}` }}>
+                    <SkeletonBox style={{ width:82, height:62, borderRadius:10, flexShrink:0 }} />
+                    <div style={{ flex:1, paddingTop:4 }}>
+                      <SkeletonBox style={{ width:'95%', height:12, borderRadius:6 }} />
+                      <SkeletonBox style={{ width:'80%', height:12, borderRadius:6, marginTop:7 }} />
+                      <SkeletonBox style={{ width:'40%', height:10, borderRadius:5, marginTop:10 }} />
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
 
             {filteredHome.map((n, idx) => {
               const isLocalAI = n.source === 'LocalAI TV' || n.channel === 'LocalAI TV';

@@ -45,6 +45,7 @@ const DEFAULT_SERVICE = 'main';
 const ROUTES = {
   '/classifieds':    'aiservices',
   '/feed':           'aiservices',  // /feed/vegetables, /feed/talent, /feed/public-voice, /feed/guests
+  '/public-voice-requests': 'aiservices',  // GET list/detail of public-voice submissions
   // Add new endpoint prefixes here, e.g.:
   //   '/forms':  'aiservices',
   //   '/upload': 'aiservices'
