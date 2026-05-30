@@ -47,16 +47,11 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
     'Shopping':     'linear-gradient(135deg,#F57F17,#FFB300)',
   };
 
-<<<<<<< Updated upstream
-  // If an uploaded video is present, play it (autoplay, looped, with controls).
-  if (safeVideos.length > 0) {
-=======
   // If an uploaded/generated video is present, play it (autoplay, looped,
   // with controls). EXCEPTION: "Who is Who" always shows the photo only —
   // no bulletin video is generated for that category, and even if a stray
   // URL ever appears in `videos` we want the headshot to render instead.
-  if (cat !== 'Who is Who' && Array.isArray(videos) && videos.length > 0) {
->>>>>>> Stashed changes
+  if (cat !== 'Who is Who' && safeVideos.length > 0) {
     return (
       <div style={{ width:'100%', height:'100%', position:'relative', background:'#000' }}>
         <video
