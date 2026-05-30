@@ -75,15 +75,31 @@ function ShortNewsSection({ channel, items: liveItems }) {
               setOpenIdx(realIdx >= 0 ? realIdx : 0);
             }}
             style={{ flexShrink:0, width:108, cursor:'pointer', position:'relative' }}>
-            {/* Clean 9:16 thumbnail — no text overlays, no dark gradient */}
+            {/* Clean 9:16 thumbnail — no text overlays, no dark gradient.
+                Prefers a looping <video> preview when the source row has a
+                generated bulletin URL (s.previewVideo); falls back to the
+                uploader-provided photo. */}
             <div style={{ width:108, height:192, borderRadius:10, overflow:'hidden',
               background:'#111', position:'relative' }}>
-              <img
-                src={s.img}
-                alt={s.titleEn}
-                style={{ width:'100%', height:'100%', objectFit:'cover' }}
-                onError={e => { e.target.style.opacity = '0.25'; }}
-              />
+              {s.previewVideo ? (
+                <video
+                  src={s.previewVideo}
+                  poster={s.img}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  preload="metadata"
+                  style={{ width:'100%', height:'100%', objectFit:'cover', background:'#000' }}
+                />
+              ) : (
+                <img
+                  src={s.img}
+                  alt={s.titleEn}
+                  style={{ width:'100%', height:'100%', objectFit:'cover' }}
+                  onError={e => { e.target.style.opacity = '0.25'; }}
+                />
+              )}
               {/* Tiny LIVE indicator — pulsing red dot only, no text */}
               {s.live && (
                 <div style={{ position:'absolute', top:7, left:7,
@@ -155,7 +171,14 @@ function publicVoiceToShortShape(pv) {
     live:        false,
     uploadDate:  pv.date || '',
     uploadTime:  pv.time || '',
+<<<<<<< Updated upstream
     img:         safeImageUrl((pv.images && pv.images[0]) || pv.thumbnail),
+=======
+    img:         (pv.images && pv.images[0]) || pv.thumbnail || '',
+    // Forward the generated-bulletin URL (if any) so the thumbnail strip can
+    // render a looping preview <video> instead of the static photo.
+    previewVideo:(pv.videos && pv.videos[0]) || '',
+>>>>>>> Stashed changes
     bg:          ['#0a0010','#3a0030'],
     uploadedAt:  pv.uploadedAt ? new Date(pv.uploadedAt) : new Date(),
   };

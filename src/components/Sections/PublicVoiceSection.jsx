@@ -119,10 +119,12 @@ function PublicVoiceSection({ onNavigate, channel }) {
         {looped.map((s, i) => (
           <div key={`pv-${i}`} onClick={() => openCard(s)}
             style={{ flexShrink:0, width:108, marginRight:8, cursor:'pointer', position:'relative' }}>
-            {/* Clean 9:16 thumbnail — uses uploader-provided image; play
-                badge shown when the item has a playable media URL. */}
+            {/* Clean 9:16 thumbnail — prefers the generated bulletin video
+                (cl.videos[0]) when present; falls back to uploader-provided
+                image; play badge shown when a playable media URL exists. */}
             <div style={{ width:108, height:192, borderRadius:10, overflow:'hidden',
               background:'#111', position:'relative' }}>
+<<<<<<< Updated upstream
               <img
                 src={safeImageUrl((s.images && s.images[0]) || s.thumbnail)}
                 alt={s.title}
@@ -131,6 +133,30 @@ function PublicVoiceSection({ onNavigate, channel }) {
                   pointerEvents:'none' }}
                 onError={e => { e.target.style.opacity = '0.25'; }}
               />
+=======
+              {Array.isArray(s.videos) && s.videos[0] ? (
+                <video
+                  src={s.videos[0]}
+                  poster={(s.images && s.images[0]) || s.thumbnail || ''}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  preload="metadata"
+                  style={{ width:'100%', height:'100%', objectFit:'cover',
+                    pointerEvents:'none', background:'#000' }}
+                />
+              ) : (
+                <img
+                  src={(s.images && s.images[0]) || s.thumbnail || ''}
+                  alt={s.title}
+                  draggable={false}
+                  style={{ width:'100%', height:'100%', objectFit:'cover',
+                    pointerEvents:'none' }}
+                  onError={e => { e.target.style.opacity = '0.25'; }}
+                />
+              )}
+>>>>>>> Stashed changes
               {/* Play icon overlay — shown when the item has a playable video */}
               {(s.mediaUrl || s.video_url) && (
                 <div style={{ position:'absolute', inset:0,

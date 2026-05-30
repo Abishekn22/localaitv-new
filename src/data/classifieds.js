@@ -313,7 +313,8 @@ const CL_CAT_IMG = {
   Birthdays:      'https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?w=400&q=75',
   'Marriage Anniversary':'https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=400&q=75',
   Marriages:      'https://images.unsplash.com/photo-1606800052052-a08af7148866?w=400&q=75',
-  'Who is Who':   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&q=75',
+  // Portrait / public-figure stock photo (was a Lamborghini by mistake).
+  'Who is Who':   'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&q=75',
   'Talent Show':  'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=75',
   'Public Voice': PLACEHOLDER_IMG,  // was a dead Unsplash URL (404 → HTML) that triggered CORB on every Public Voice card
   Jobs:           'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=400&q=75',

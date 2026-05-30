@@ -20,6 +20,17 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
   // For every category the API returns live data for, use ONLY the live rows;
   // keep the static mock for categories that have no live data yet.
   const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
+  // TEMP DEBUG — remove once videos render correctly.
+  // Logs to browser console what /classifieds returned so we can see whether
+  // each card has a populated videos[] array.
+  if (typeof window !== 'undefined' && !window.__cl_logged) {
+    window.__cl_logged = true;
+    // eslint-disable-next-line no-console
+    console.log('[Classifieds] constituency =', constituency,
+      ' liveItems =', liveItems.length,
+      ' withVideos =', liveItems.filter(c => Array.isArray(c.videos) && c.videos[0]).length,
+      ' sample =', liveItems[0]);
+  }
   const liveCats  = new Set(liveItems.map(c => c.cat));
   const all = liveItems.length > 0
     ? [...liveItems, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
@@ -149,15 +160,41 @@ function ClassifiedsSection({ onNavigate, constituency, channel }) {
               onTouchStart={e=>e.currentTarget.style.transform='scale(0.97)'}
               onTouchEnd={e=>e.currentTarget.style.transform='scale(1)'}
             >
-              {/* Real category thumbnail image */}
+              {/* Real category thumbnail — prefer generated bulletin video when present,
+                  fall back to the uploaded photo, then to the category placeholder.
+                  EXCEPTION: "Who is Who" always shows the photo only — no bulletin
+                  video is generated for that category and we don't want to play one
+                  even if a stray URL ever shows up in `videos`. */}
               <div style={{width:'100%',height:100,position:'relative',overflow:'hidden',
                 background:T.bg3}}>
+<<<<<<< Updated upstream
                 <img
                   src={safeImageUrl((Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events'])}
                   alt={cl.cat}
                   style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}
                   onError={e=>{ if (e.target.src.endsWith('/placeholder.svg')) return; e.target.src = '/placeholder.svg'; }}
                 />
+=======
+                {cl.cat !== 'Who is Who' && Array.isArray(cl.videos) && cl.videos[0] ? (
+                  <video
+                    src={cl.videos[0]}
+                    poster={(Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']}
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    style={{width:'100%',height:'100%',objectFit:'cover',display:'block',background:'#000'}}
+                  />
+                ) : (
+                  <img
+                    src={(Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']}
+                    alt={cl.cat}
+                    style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}
+                    onError={e=>{ e.target.src = CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events']; }}
+                  />
+                )}
+>>>>>>> Stashed changes
                 {/* Light gradient at bottom for text */}
                 <div style={{position:'absolute',bottom:0,left:0,right:0,height:40,
                   background:'linear-gradient(0deg,rgba(0,0,0,0.55),transparent)'}}/>

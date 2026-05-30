@@ -76,7 +76,11 @@ export const APP_VERSION = '1.0.6';
 
 async function _fetchJSON(base, path, opts = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  // /classifieds runs many per-listing video lookups + presigns ~30 S3 URLs
+  // and can take 8-15s. Give it a generous ceiling so the response isn't
+  // discarded mid-flight (which causes the UI to fall back to static mock
+  // data with no videos).
+  const timer = setTimeout(() => controller.abort(), 30000);
   try {
     const res = await fetch(`${base}${path}`, {
       ...opts,
