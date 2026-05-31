@@ -60,7 +60,11 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   // Show only the SELECTED location's items: match on location_id. Null-location
   // rows (already name-scoped by the API) are kept; any cross-location row is
   // dropped. location_id is nullable per the API.
-  const allLive = Array.isArray(liveClassifieds) ? liveClassifieds : [];
+  // Only admin-approved (verified) classifieds reach the home page — every
+  // /classifieds card now carries `verified` (classifieds_feed.py). Unverified
+  // submissions are hidden until an admin accepts them in the moderation queue.
+  const allLive = (Array.isArray(liveClassifieds) ? liveClassifieds : [])
+    .filter(c => c.verified === true || c.verified === 'true' || c.verified === 1 || c.verified === '1');
   const liveItems = locationId != null
     ? allLive.filter(c => c.location_id == null || String(c.location_id) === String(locationId))
     : allLive;

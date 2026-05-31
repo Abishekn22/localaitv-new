@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../_imports.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { SkeletonBox } from '../components/atoms.jsx';
 
 // Display / auto-expiry rules shown in the admin "Display Rules" module.
 // This is the single source of truth — edit this array (or paste a new version
@@ -75,7 +76,8 @@ function AdminDashboardScreen({ onBack }) {
   const [reportsLoadingMore, setReportsLoadingMore] = useState(false); // subsequent pages
   const [reportsHasMore, setReportsHasMore] = useState(true);
   const [reportsErr, setReportsErr] = useState('');
-  const [reportFilter, setReportFilter] = useState('all'); // moderation queue status filter
+  const [reportFilter, setReportFilter] = useState('all'); // moderation queue status filter (news)
+  const [catVerFilter, setCatVerFilter] = useState('all');  // non-news catalogs: all | verified | unverified
   const [reportCategory, setReportCategory] = useState('all'); // content-category tab
   const [reportSearch, setReportSearch] = useState('');    // name / subject / email search
   const [reportLocFilter, setReportLocFilter] = useState('all'); // location filter
@@ -97,11 +99,11 @@ function AdminDashboardScreen({ onBack }) {
     finally { setClassifiedsLoading(false); }
   }, []);
 
-  // Per-category feeds (veg / talent / public-voice / guests) — lazy-loaded.
-  const FEED_ENDPOINT = { veg: '/feed/vegetables', talent: '/feed/talent', voice: '/public-voice-requests', guest: '/feed/guests' };
+  // Per-category feeds (veg / talent / public-voice) — lazy-loaded.
+  const FEED_ENDPOINT = { veg: '/feed/vegetables', talent: '/feed/talent', voice: '/public-voice-requests' };
   const [feedData, setFeedData] = useState({}); // catKey -> { items, loading, err, loaded }
   const loadFeed = useCallback(async (catKey) => {
-    const path = ({ veg:'/feed/vegetables', talent:'/feed/talent', voice:'/public-voice-requests', guest:'/feed/guests' })[catKey];
+    const path = ({ veg:'/feed/vegetables', talent:'/feed/talent', voice:'/public-voice-requests' })[catKey];
     if (!path) return;
     setFeedData(prev => ({ ...prev, [catKey]: { ...(prev[catKey] || {}), loading: true, err: '' } }));
     try {
@@ -216,6 +218,27 @@ function AdminDashboardScreen({ onBack }) {
     } finally { setCrudBusy(b => b === key ? null : b); }
   }, [applyLocal]);
 
+  // Classifieds item.type → { admin CRUD resource, feed id prefix }. Lifted
+  // here so both the moderation list AND the catalog detail page can resolve
+  // a record's resource without duplicating the table.
+  const TYPE_META = {
+    birthday:    { resource:'birthdays',            prefix:'bd' },
+    anniversary: { resource:'marriage-anniversary', prefix:'an' },
+    marriage:    { resource:'marriages',            prefix:'mr' },
+    whoiswho:    { resource:'whoiswho',             prefix:'ww' },
+    event:       { resource:'events',               prefix:'ev' },
+    job:         { resource:'jobs',                 prefix:'jb' },
+    vehicle:     { resource:'carsales',             prefix:'cs' },
+    rent:        { resource:'houserental',          prefix:'hr' },
+    shopping:    { resource:'shopping',             prefix:'sh' },
+  };
+  const resourceForType = (t) => (TYPE_META[String(t || '').toLowerCase()] || {}).resource || null;
+  const rawIdForType = (t, id) => {
+    const meta = TYPE_META[String(t || '').toLowerCase()];
+    const s = String(id == null ? '' : id);
+    return (meta && s.startsWith(meta.prefix)) ? s.slice(meta.prefix.length) : s;
+  };
+
   // Report counts (total + per-status) for the "Pending Review" KPI.
   const loadReportStats = useCallback(async () => {
     try {
@@ -284,15 +307,29 @@ function AdminDashboardScreen({ onBack }) {
     if (view === 'users') { loadUsers(); loadLocations(); }
   }, [view, loadReports, loadClassifieds, loadUsers, loadLocations]);
 
-  // Lazy-load the per-category feed (veg/talent/voice/guest) when its tab opens.
+  // Lazy-load the per-category feed (veg/talent/voice) when its tab opens.
   useEffect(() => {
     if (view === 'moderation' && FEED_ENDPOINT[reportCategory] && !feedData[reportCategory]?.loaded && !feedData[reportCategory]?.loading) {
       loadFeed(reportCategory);
     }
   }, [view, reportCategory, loadFeed, feedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load on mount: user list (Citizens KPI) + report counts (Pending Review KPI).
-  useEffect(() => { loadUsers(); loadReportStats(); }, [loadUsers, loadReportStats]);
+  // Load on mount: user list (Citizens KPI) + report counts (Pending Review KPI)
+  // + classifieds (Classifieds KPI + Analytics). All hit live production APIs.
+  useEffect(() => { loadUsers(); loadReportStats(); loadClassifieds(); }, [loadUsers, loadReportStats, loadClassifieds]);
+
+  // Analytics & Audit modules aggregate the same live data the rest of the
+  // dashboard uses — pull every source when those views open so the numbers
+  // are real (no synthetic placeholders).
+  useEffect(() => {
+    if (view === 'analytics') {
+      loadReportStats(); loadClassifieds(); loadUsers();
+      ['talent','voice','veg'].forEach(k => {
+        if (!feedData[k]?.loaded && !feedData[k]?.loading) loadFeed(k);
+      });
+    }
+    if (view === 'audit') { loadReports(); loadUsers(); }
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh the logged-in user's live role/verification when the dashboard opens,
   // so the role-locked tab + gating reflect any change made since login.
@@ -447,15 +484,19 @@ function AdminDashboardScreen({ onBack }) {
   };
   const auditScope = role === 'super' ? 'All admins (full)' : role === 'master' ? 'Your team only' : 'Your own actions only';
 
-  // ── KPIs scale by role scope (super/master = all-India, admin = AP+TG) ──
-  const wide = role !== 'admin';
+  // ── KPIs — all derived from LIVE data the dashboard already loads.
+  // (The former "In AI Pipeline" / "Dead-letter" placeholders belonged to the
+  // AI-pipeline system, which is out of scope — replaced with real in-app metrics.)
+  const inr = (n) => Number(n || 0).toLocaleString('en-IN');
+  const liveChannelCount = (LIVE_CHANNELS || []).filter(c => c.live).length;
+  const approvedReports = reportStats ? Number((reportStats.byStatus && reportStats.byStatus.approved) || 0) : null;
   const KPI = [
-    { icon:'📋', label:'Pending Review',  value: reportStats ? Number(reportStats.new || 0).toLocaleString('en-IN') : '…',   c:'#F59E0B' },
-    { icon:'⚙️', label:'In AI Pipeline',  value: wide ? '318'   : '22',   c:'#3B82F6' },
-    { icon:'✅', label:'Published Today',  value: wide ? '4,870' : '410',  c:'#10B981' },
-    { icon:'📺', label:'Live Channels',   value: wide ? '9'     : '9',    c:'#D0021B' },
-    { icon:'🛑', label:'Dead-letter',     value: wide ? '7'     : '1',    c:'#EF4444' },
-    { icon:'👥', label:'Citizens',        value: usersLoading && !users.length ? '…' : users.length.toLocaleString('en-IN'), c:'#8B5CF6' },
+    { icon:'📋', label:'Pending Review',  value: reportStats ? inr(reportStats.new) : '…',   c:'#F59E0B' },
+    { icon:'🗂️', label:'Classifieds',     value: classifiedsLoading && !classifieds.length ? '…' : inr(classifieds.length), c:'#3B82F6' },
+    { icon:'✅', label:'Approved News',    value: approvedReports == null ? '…' : inr(approvedReports),  c:'#10B981' },
+    { icon:'📺', label:'Live Channels',   value: inr(liveChannelCount),    c:'#D0021B' },
+    { icon:'📰', label:'Total Reports',   value: reportStats ? inr(reportStats.total) : '…',     c:'#0EA5E9' },
+    { icon:'👥', label:'Citizens',        value: usersLoading && !users.length ? '…' : inr(users.length), c:'#8B5CF6' },
   ];
 
   // ── 15 modules — Plan v1.3 functional areas. need = capability gate ──
@@ -767,7 +808,7 @@ function AdminDashboardScreen({ onBack }) {
   // Lazy-load contacts when the Form Submissions card is opened. Kept as its own
   // effect (after loadContacts is defined) to avoid a temporal-dead-zone ref.
   useEffect(() => {
-    if (view === 'forms' && !formsLoaded && !formsLoading) loadContacts();
+    if ((view === 'forms' || view === 'audit') && !formsLoaded && !formsLoading) loadContacts();
   }, [view, loadContacts, formsLoaded, formsLoading]);
   const [formNote, setFormNote] = useState('');
   const [formNextStatus, setFormNextStatus] = useState('contacted');
@@ -1276,7 +1317,18 @@ function AdminDashboardScreen({ onBack }) {
             <button onClick={loadContacts} style={{fontSize:12,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 14px',cursor:'pointer'}}>↻ Retry</button>
           </div>
         ) : (formsLoading && !formsLoaded) ? (
-          <div style={{...cardS,textAlign:'center',color:T.textMuted,padding:'30px 18px',fontSize:13}}>Loading form submissions…</div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} style={{...cardS,display:'flex',gap:10,alignItems:'center'}}>
+                <SkeletonBox style={{ width:36, height:36, borderRadius:9, flexShrink:0 }} />
+                <div style={{flex:1,minWidth:0}}>
+                  <SkeletonBox style={{ width:'50%', height:12, borderRadius:6 }} />
+                  <SkeletonBox style={{ width:'70%', height:10, borderRadius:5, marginTop:7 }} />
+                </div>
+                <SkeletonBox style={{ width:54, height:22, borderRadius:7, flexShrink:0 }} />
+              </div>
+            ))}
+          </div>
         ) : (
         <>
         <SecH>By category</SecH>
@@ -1622,6 +1674,136 @@ function AdminDashboardScreen({ onBack }) {
     );
   }
 
+  // Detail screen for catalog items (classifieds / talent / public-voice / veg)
+  // that previously had no per-item review surface. Re-uses the same verify/
+  // delete handlers as the inline cards. Looks up the LIVE record from current
+  // parent state so the Verified chip and button enable/disable reflect the
+  // result of Accept/Reject without needing to re-open the page.
+  function CatalogItemDetail({ item: passed, kind, category }) {
+    const live = useMemo(() => {
+      if (kind === 'classifieds') {
+        return classifieds.find(x => String(x.id) === String(passed.id)) || passed;
+      }
+      const list = (feedData[kind] || {}).items || [];
+      return list.find(x => String(x.id) === String(passed.id)) || passed;
+    }, [passed, kind, classifieds, feedData]);
+    const it = live;
+    const isTalent = kind === 'talent';
+    const imgs = isTalent ? [] : (Array.isArray(it.images) ? it.images.filter(Boolean) : (it.image ? [it.image] : []));
+    const vids = Array.isArray(it.videos) ? it.videos.filter(Boolean) : [];
+    const verified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
+    const st = String(it.status || '').trim();
+    const sc = /pending/i.test(st) ? '#F59E0B' : /approv|publish/i.test(st) ? '#10B981' : /reject/i.test(st) ? '#EF4444' : '#6B7280';
+    const sub = it.role || it.eventName || it.uploaderName || it.uploader_name || it.performerName || it.issueName || it.issue_name || '';
+    const durSec = typeof it.durationSeconds === 'number' ? it.durationSeconds
+      : (typeof it.duration_seconds === 'number' ? it.duration_seconds : null);
+    const close = () => setDrill(d => d.slice(0, -1));
+
+    // Decide which action set this kind uses.
+    const cres = kind === 'classifieds' ? resourceForType(it.type) : (kind === 'talent' ? 'talent' : null);
+    const crawId = kind === 'classifieds'
+      ? rawIdForType(it.type, it.id)
+      : (kind === 'talent' ? String(it.id == null ? '' : it.id).replace(/^talent/, '') : null);
+    const cbusy = cres && crudBusy === `${cres}:${it.id}`;
+    // catKey used by applyLocal/verifyRecord to know which slice of state to
+    // update. Match the inline card: feeds → 'talent'/'voice'/'veg', classifieds
+    // → the active reportCategory the user came from.
+    const catKey = kind === 'classifieds' ? (category || it.cat || it.type) : kind;
+
+    return (
+      <div>
+        {/* Header card */}
+        <div style={{...cardS}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:6}}>
+            <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:16,fontWeight:800,color:T.text,lineHeight:1.3}}>
+              {it.title || it.name || it.issue_name || '(untitled)'}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end',flexShrink:0}}>
+              {(kind === 'classifieds' || kind === 'voice' || kind === 'talent') && (
+                <Chip txt={verified ? 'Verified' : 'Unverified'} c={verified ? '#10B981' : '#F59E0B'} />
+              )}
+              {st && <Chip txt={st} c={sc} />}
+            </div>
+          </div>
+          {sub && <div style={{fontSize:12,color:T.textMuted,marginBottom:4}}>{sub}</div>}
+          <div style={{fontSize:12,color:T.textMuted,display:'flex',gap:12,flexWrap:'wrap'}}>
+            {(it.location || it.location_te) && <span>📍 {it.location || it.location_te}</span>}
+            {it.date && <span>📅 {it.date}</span>}
+            {it.time && <span>🕐 {it.time}</span>}
+            {it.phone && <span>📞 {it.phone}</span>}
+            {it.education && <span>🎓 {it.education}</span>}
+            {typeof durSec === 'number' && durSec > 0 && <span>⏱ {durSec}s</span>}
+          </div>
+        </div>
+
+        {/* Media — videos first (large), then image gallery */}
+        {vids.length > 0 && (
+          <div style={{marginBottom:10}}>
+            <SecH>Video</SecH>
+            {vids.map((v, j) => (
+              <video key={j} src={v} controls playsInline preload="metadata"
+                style={{width:'100%', maxHeight:360, borderRadius:10, background:'#000', marginBottom:8}} />
+            ))}
+          </div>
+        )}
+        {imgs.length > 0 && (
+          <div style={{marginBottom:10}}>
+            <SecH>Photos ({imgs.length})</SecH>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {imgs.map((u, j) => (
+                <a key={j} href={u} target="_blank" rel="noreferrer"
+                   style={{display:'block',height:140,borderRadius:9,backgroundImage:`url(${u})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`}}/>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Description */}
+        {(it.desc || it.description) && (
+          <div style={{...cardS}}>
+            <SecH>Description</SecH>
+            <div style={{fontSize:12.5,color:T.text,lineHeight:1.55,whiteSpace:'pre-wrap'}}>
+              {it.desc || it.description}
+            </div>
+          </div>
+        )}
+
+        {/* Veg price board */}
+        {kind === 'veg' && Array.isArray(it.prices) && it.prices.length > 0 && (
+          <div style={{...cardS,padding:0,overflow:'hidden'}}>
+            <SecH>Prices</SecH>
+            {it.prices.map((p, j) => (
+              <KV key={j} k={p.name_telugu || p.name} v={p.price_display || ('Rs.'+p.price)} />
+            ))}
+            <div style={{padding:'4px 0'}}/>
+          </div>
+        )}
+
+        {/* Actions */}
+        {kind === 'voice' && (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:4}}>
+            <button onClick={()=>{ if(!verified) verifyVoice(it.id, true); }} disabled={verified}
+              style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:10,padding:'12px',cursor:verified?'default':'pointer',opacity:verified?0.5:1}}>✅ Accept</button>
+            <button onClick={()=>{ if(verified) verifyVoice(it.id, false); }} disabled={!verified}
+              style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:10,padding:'12px',cursor:verified?'pointer':'default',opacity:verified?1:0.5}}>❌ Reject</button>
+            <button onClick={()=>{ deleteVoice(it.id); close(); }}
+              style={{fontSize:13,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'12px',cursor:'pointer',gridColumn:'span 2'}}>🗑 Delete</button>
+          </div>
+        )}
+        {cres && (kind === 'classifieds' || kind === 'talent') && (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:4}}>
+            <button onClick={()=>{ if(!verified && !cbusy) verifyRecord(cres, crawId, true, catKey, it.id); }} disabled={verified || cbusy}
+              style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:10,padding:'12px',cursor:(verified||cbusy)?'default':'pointer',opacity:(verified||cbusy)?0.5:1}}>✅ Accept</button>
+            <button onClick={()=>{ if(verified && !cbusy) verifyRecord(cres, crawId, false, catKey, it.id); }} disabled={!verified || cbusy}
+              style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#EF4444,#B91C1C)',border:'none',borderRadius:10,padding:'12px',cursor:(verified&&!cbusy)?'pointer':'default',opacity:(verified&&!cbusy)?1:0.5}}>❌ Reject</button>
+            <button onClick={()=>{ if(!cbusy) { deleteRecord(cres, crawId, catKey, it.id); close(); } }} disabled={cbusy}
+              style={{fontSize:13,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'12px',cursor:cbusy?'default':'pointer',opacity:cbusy?0.6:1,gridColumn:'span 2'}}>🗑 Delete</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DrillScreen() {
     const f = drill[drill.length-1];
     if (f.type==='metric')        return <MetricView metric={f.metric}/>;
@@ -1632,6 +1814,7 @@ function AdminDashboardScreen({ onBack }) {
     if (f.type==='pending')       return <PendingTable/>;
     if (f.type==='pendingreview') return <PendingReviewDetail item={f.item}/>;
     if (f.type==='reportreview')  return <ReportReview report={f.report}/>;
+    if (f.type==='catalogdetail') return <CatalogItemDetail item={f.item} kind={f.kind} category={f.category}/>;
     if (f.type==='formslist')     return <FormsList category={f.category}/>;
     if (f.type==='formdetail')    return <FormDetail sub={f.sub}/>;
     return null;
@@ -1646,6 +1829,7 @@ function AdminDashboardScreen({ onBack }) {
     if (f.type==='pending')       return 'Pending Reviews';
     if (f.type==='pendingreview') return 'Review · ' + f.item.id;
     if (f.type==='reportreview')  return 'Report · ' + reportReporter(f.report);
+    if (f.type==='catalogdetail') return (f.item && (f.item.title || f.item.name || f.item.issue_name)) || 'Item detail';
     if (f.type==='formslist')     return (FORM_CATS.find(c=>c.key===f.category)||{}).label || 'Form submissions';
     if (f.type==='formdetail')    return 'Submission · ' + f.sub.id;
     return '';
@@ -1707,6 +1891,26 @@ function AdminDashboardScreen({ onBack }) {
     if (m && m.need && !can(m.need)) return <Locked need={m.need} />;
 
     if (view === 'moderation') {
+      // Shared loading skeleton — a list of placeholder cards mirroring the
+      // moderation-queue row layout (thumbnail + two text lines + action bar).
+      const modSkeleton = (rows = 4) => (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} style={{...cardS,display:'flex',gap:12,alignItems:'flex-start'}}>
+              <SkeletonBox style={{ width:64, height:64, borderRadius:10, flexShrink:0 }} />
+              <div style={{flex:1,minWidth:0}}>
+                <SkeletonBox style={{ width:'70%', height:13, borderRadius:6 }} />
+                <SkeletonBox style={{ width:'45%', height:11, borderRadius:6, marginTop:8 }} />
+                <SkeletonBox style={{ width:'90%', height:10, borderRadius:5, marginTop:10 }} />
+                <div style={{display:'flex',gap:8,marginTop:12}}>
+                  <SkeletonBox style={{ width:74, height:28, borderRadius:8 }} />
+                  <SkeletonBox style={{ width:74, height:28, borderRadius:8 }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
       // Status filter pills built from the statuses actually present (reports carry `status`, not a category).
       const statusesPresent = Array.from(new Set(reports.map(r => String(r.status || 'new').toLowerCase())));
       const pills = ['all', ...statusesPresent];
@@ -1743,48 +1947,44 @@ function AdminDashboardScreen({ onBack }) {
         { key:'veg',         label:'Veg Prices',   icon:'🥦' },
         { key:'talent',      label:'Talent',       icon:'🎭' },
         { key:'voice',       label:'Public Voice', icon:'📢' },
-        { key:'guest',       label:'Guest Intake', icon:'🎬' },
       ];
       // Routing: News → /webhooks/reports · classifieds tabs → /api/classifieds (by type)
-      // · the rest (veg/talent/voice/guest) have no GET feed yet → placeholder.
+      // · the rest (veg/talent/voice) have no GET feed yet → placeholder.
       const CLASSIFIEDS_CAT_TYPE = { all:null, birthday:'birthday', anniversary:'anniversary', marriage:'marriage', whoiswho:'whoiswho', events:'event', jobs:'job', vehicle:'vehicle', rental:'rent', shopping:'shopping' };
-      // Classifieds item.type → { admin CRUD resource, feed id prefix }. Drives
-      // the verify/delete buttons so every catalog item targets the right table
-      // — even on the mixed "All" tab, where it's resolved per item. The feed
-      // (classifieds_feed.py) prefixes ids per type (sh22, cs27, bdced73154…),
-      // but the admin CRUD routes match the raw table id, so we strip the prefix.
-      const TYPE_META = {
-        birthday:    { resource:'birthdays',            prefix:'bd' },
-        anniversary: { resource:'marriage-anniversary', prefix:'an' },
-        marriage:    { resource:'marriages',            prefix:'mr' },
-        whoiswho:    { resource:'whoiswho',             prefix:'ww' },
-        event:       { resource:'events',               prefix:'ev' },
-        job:         { resource:'jobs',                 prefix:'jb' },
-        vehicle:     { resource:'carsales',             prefix:'cs' },
-        rent:        { resource:'houserental',          prefix:'hr' },
-        shopping:    { resource:'shopping',             prefix:'sh' },
-      };
-      const resourceForType = (t) => (TYPE_META[String(t || '').toLowerCase()] || {}).resource || null;
-      // Strip the feed's per-type prefix to recover the raw table id the admin
-      // API expects. Falls back to the id as-is when it doesn't carry the prefix.
-      const rawIdForType = (t, id) => {
-        const meta = TYPE_META[String(t || '').toLowerCase()];
-        const s = String(id == null ? '' : id);
-        return (meta && s.startsWith(meta.prefix)) ? s.slice(meta.prefix.length) : s;
-      };
       const isNewsCat = reportCategory === 'news';
       const isClassifiedsCat = Object.prototype.hasOwnProperty.call(CLASSIFIEDS_CAT_TYPE, reportCategory);
       const isFeedCat = Object.prototype.hasOwnProperty.call(FEED_ENDPOINT, reportCategory);
       const isPlaceholderCat = !isNewsCat && !isClassifiedsCat && !isFeedCat;
       const activeCat = REPORT_CATS.find(c => c.key === reportCategory) || REPORT_CATS[0];
       const classifiedsType = CLASSIFIEDS_CAT_TYPE[reportCategory] || null;
+      // Verified/Unverified filter for the non-news catalogs (classifieds + the
+      // talent/voice feeds). These resources track approval via the
+      // `verified` boolean — there's no separate new/approved/rejected state —
+      // so "Verified" == approved/accepted and "Unverified" == pending/rejected.
+      const vbool = (it) => it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
+      const verPass = (it) => catVerFilter === 'all' || (catVerFilter === 'verified' ? vbool(it) : !vbool(it));
+      // Veg is an aggregated price board with no per-row verified — never gate it.
+      const catSupportsVerified = !isNewsCat && reportCategory !== 'veg';
       const visibleClassifieds = (classifiedsType
         ? classifieds.filter(it => String(it.type || '').toLowerCase() === classifiedsType)
         : classifieds
-      ).filter(it => !q || [it.title, it.name, it.desc, it.location, it.cat].some(f => f != null && String(f).toLowerCase().includes(q)));
-      // Per-category feed (veg/talent/voice/guest)
+      ).filter(it => !q || [it.title, it.name, it.desc, it.location, it.cat].some(f => f != null && String(f).toLowerCase().includes(q)))
+       .filter(it => !catSupportsVerified || verPass(it));
+      // Per-category feed (veg/talent/voice)
       const feedState = feedData[reportCategory] || {};
-      const feedItems = (feedState.items || []).filter(it => !q || [it.title, it.name, it.performerName, it.issueName, it.uploaderName, it.location, it.role].some(f => f != null && String(f).toLowerCase().includes(q)));
+      const feedItems = (feedState.items || []).filter(it => !q || [it.title, it.name, it.performerName, it.issueName, it.uploaderName, it.location, it.role].some(f => f != null && String(f).toLowerCase().includes(q)))
+       .filter(it => (!catSupportsVerified || reportCategory === 'veg') ? true : verPass(it));
+      // Base (search-applied, pre-verified-filter) list for the active non-news
+      // cat — drives the result count + the verified/unverified pill counts.
+      const catBaseItems = isClassifiedsCat
+        ? (classifiedsType ? classifieds.filter(it => String(it.type || '').toLowerCase() === classifiedsType) : classifieds)
+            .filter(it => !q || [it.title, it.name, it.desc, it.location, it.cat].some(f => f != null && String(f).toLowerCase().includes(q)))
+        : (isFeedCat ? (feedState.items || []).filter(it => !q || [it.title, it.name, it.performerName, it.issueName, it.uploaderName, it.location, it.role].some(f => f != null && String(f).toLowerCase().includes(q))) : []);
+      const catVisibleItems = isClassifiedsCat ? visibleClassifieds : (isFeedCat ? feedItems : []);
+      const catVerCount = catBaseItems.filter(vbool).length;
+      const catUnverCount = catBaseItems.length - catVerCount;
+      const hasCatFilters = catVerFilter !== 'all' || !!q;
+      const clearCatFilters = () => { setCatVerFilter('all'); setReportSearch(''); };
 
       return (
         <div>
@@ -1808,7 +2008,7 @@ function AdminDashboardScreen({ onBack }) {
             })}
           </div>
 
-          {/* veg / talent / voice / guest have no GET feed yet → placeholder */}
+          {/* veg / talent / voice have no GET feed yet → placeholder */}
           {isPlaceholderCat && (
             <div style={{...cardS,textAlign:'center',padding:'40px 22px'}}>
               <div style={{fontSize:40,marginBottom:10}}>{activeCat.icon}</div>
@@ -1875,8 +2075,47 @@ function AdminDashboardScreen({ onBack }) {
             </div>
           )}
 
+          {/* Non-news catalogs — search + verified filter pills */}
+          {(isClassifiedsCat || isFeedCat) && (
+            <div style={{...cardS,display:'flex',flexDirection:'column',gap:8}}>
+              <div style={{position:'relative'}}>
+                <span style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',fontSize:13,color:T.textMuted,pointerEvents:'none'}}>🔍</span>
+                <input type="text" value={reportSearch} onChange={e=>setReportSearch(e.target.value)}
+                  placeholder="Search by title, name, location…"
+                  style={{width:'100%',boxSizing:'border-box',background:T.bg3,border:`1px solid ${T.border}`,borderRadius:9,padding:'9px 32px 9px 32px',color:T.text,fontSize:12.5,outline:'none'}}/>
+                {reportSearch && (
+                  <button onClick={()=>setReportSearch('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:T.textMuted,fontSize:14,cursor:'pointer',lineHeight:1,padding:2}}>✕</button>
+                )}
+              </div>
+              {catSupportsVerified && (
+                <div style={{display:'flex',gap:6,overflowX:'auto',paddingBottom:2}}>
+                  {[
+                    { key:'all',        label:'All',        cnt: catBaseItems.length, c:'#D0021B' },
+                    { key:'verified',   label:'Approved',   cnt: catVerCount,         c:'#16A34A' },
+                    { key:'unverified', label:'Pending',    cnt: catUnverCount,       c:'#F59E0B' },
+                  ].map(p => {
+                    const active = catVerFilter === p.key;
+                    return (
+                      <button key={p.key} onClick={()=>setCatVerFilter(p.key)} style={{flexShrink:0,fontSize:11,fontWeight:700,cursor:'pointer',
+                        color:active?'#fff':T.textMuted, background:active?p.c:T.bg3,
+                        border:`1px solid ${active?p.c:T.border}`, borderRadius:20, padding:'6px 12px'}}>
+                        {p.label} · {p.cnt}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <span style={{fontSize:11,color:T.textMuted}}>Showing <b style={{color:T.text}}>{catVisibleItems.length}</b> of {catBaseItems.length}{q ? ' matched' : ' loaded'}</span>
+                {hasCatFilters && (
+                  <button onClick={clearCatFilters} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 11px',cursor:'pointer'}}>✕ Clear filters</button>
+                )}
+              </div>
+            </div>
+          )}
+
           {isNewsCat &&reportsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{reportsErr}</div>}
-          {isNewsCat &&reportsLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading reports…</div>}
+          {isNewsCat &&reportsLoading && modSkeleton(5)}
           {isNewsCat &&!reportsLoading && !reportsErr && reports.length === 0 && (
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No reports found.</div>
           )}
@@ -1958,7 +2197,7 @@ function AdminDashboardScreen({ onBack }) {
               <button onClick={loadClassifieds} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
             </div>
             {classifiedsErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{classifiedsErr}</div>}
-            {classifiedsLoading && !classifieds.length && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading {activeCat.label.toLowerCase()}…</div>}
+            {classifiedsLoading && !classifieds.length && modSkeleton(4)}
             {!classifiedsLoading && classifiedsLoaded && visibleClassifieds.length === 0 && (
               <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No {activeCat.label.toLowerCase()} items found.</div>
             )}
@@ -1972,9 +2211,10 @@ function AdminDashboardScreen({ onBack }) {
               const cverified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
               const cbusy = crudBusy === `${cres}:${it.id}`;
               return (
-                <div key={it.id || i} style={{...cardS, display:'flex', gap:11, alignItems:'flex-start'}}>
+                <div key={it.id || i} onClick={()=>pushDrill({type:'catalogdetail', kind:'classifieds', item:it, category:reportCategory})}
+                  style={{...cardS, display:'flex', gap:11, alignItems:'flex-start', cursor:'pointer'}}>
                   {img
-                    ? <a href={img} target="_blank" rel="noreferrer" style={{width:64,height:64,borderRadius:9,flexShrink:0,backgroundImage:`url(${img})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`,display:'block'}}/>
+                    ? <div style={{width:64,height:64,borderRadius:9,flexShrink:0,backgroundImage:`url(${img})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`}}/>
                     : <div style={{width:64,height:64,borderRadius:9,flexShrink:0,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{activeCat.icon}</div>}
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:3}}>
@@ -2001,7 +2241,7 @@ function AdminDashboardScreen({ onBack }) {
                     </div>
                     {/* Unified admin CRUD — Accept (verify=true) / Reject (verify=false) / Delete */}
                     {cres && (
-                      <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                      <div onClick={(e)=>e.stopPropagation()} style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
                         <button onClick={()=>!cverified && !cbusy && verifyRecord(cres, crawId, true, reportCategory, it.id)} disabled={cverified || cbusy}
                           style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:(cverified||cbusy)?'default':'pointer',opacity:(cverified||cbusy)?0.45:1}}>✅ Accept</button>
                         <button onClick={()=>cverified && !cbusy && verifyRecord(cres, crawId, false, reportCategory, it.id)} disabled={!cverified || cbusy}
@@ -2016,14 +2256,14 @@ function AdminDashboardScreen({ onBack }) {
             })}
           </>)}
 
-          {/* ── Per-category feeds: Veg prices / Talent / Public Voice / Guests ── */}
+          {/* ── Per-category feeds: Veg prices / Talent / Public Voice ── */}
           {isFeedCat && (<>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
               <span style={{fontSize:11,color:T.textMuted}}>Showing <b style={{color:T.text}}>{feedItems.length}</b> {activeCat.label.toLowerCase()} item{feedItems.length!==1?'s':''}</span>
               <button onClick={()=>loadFeed(reportCategory)} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
             </div>
             {feedState.err && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{feedState.err}</div>}
-            {feedState.loading && !feedState.loaded && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading {activeCat.label.toLowerCase()}…</div>}
+            {feedState.loading && !feedState.loaded && modSkeleton(4)}
             {feedState.loaded && feedItems.length === 0 && (
               <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No {activeCat.label.toLowerCase()} items found.</div>
             )}
@@ -2043,10 +2283,17 @@ function AdminDashboardScreen({ onBack }) {
               const durSec = typeof it.durationSeconds === 'number' ? it.durationSeconds
                 : (typeof it.duration_seconds === 'number' ? it.duration_seconds : null);
               return (
-                <div key={it.id || i} style={{...cardS, display:'flex', gap:11, alignItems:'flex-start'}}>
-                  {img
-                    ? <a href={img} target="_blank" rel="noreferrer" style={{width:64,height:64,borderRadius:9,flexShrink:0,backgroundImage:`url(${img})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`,display:'block'}}/>
-                    : <div style={{width:64,height:64,borderRadius:9,flexShrink:0,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{activeCat.icon}</div>}
+                <div key={it.id || i} onClick={()=>pushDrill({type:'catalogdetail', kind:reportCategory, item:it, category:reportCategory})}
+                  style={{...cardS, display:'flex', gap:11, alignItems:'flex-start', cursor:'pointer'}}>
+                  {isTalent
+                    ? (vids[0]
+                        ? <video src={`${vids[0]}#t=0.1`} muted autoPlay loop playsInline preload="metadata"
+                            style={{width:64,height:64,borderRadius:9,flexShrink:0,objectFit:'cover',background:'#000',border:`1px solid ${T.border}`}}
+                            onError={e=>{ e.target.style.display='none'; }} />
+                        : <div style={{width:64,height:64,borderRadius:9,flexShrink:0,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{activeCat.icon}</div>)
+                    : img
+                      ? <div style={{width:64,height:64,borderRadius:9,flexShrink:0,backgroundImage:`url(${img})`,backgroundSize:'cover',backgroundPosition:'center',border:`1px solid ${T.border}`}}/>
+                      : <div style={{width:64,height:64,borderRadius:9,flexShrink:0,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{activeCat.icon}</div>}
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start',marginBottom:3}}>
                       <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:13.5,fontWeight:700,color:T.text,lineHeight:1.4,
@@ -2081,11 +2328,11 @@ function AdminDashboardScreen({ onBack }) {
                     <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                       <Chip txt={it.cat || activeCat.label} c="#3B82F6" />
                       {isVeg && typeof it.count === 'number' && <span style={{fontSize:10,fontWeight:700,color:'#10B981',background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.35)',borderRadius:6,padding:'3px 7px'}}>🥦 {it.count} items</span>}
-                      {vids.length > 0 && <a href={vids[0]} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.35)',borderRadius:6,padding:'3px 7px',textDecoration:'none'}}>🎬 Video</a>}
+                      {vids.length > 0 && <a href={vids[0]} target="_blank" rel="noreferrer" onClick={(e)=>e.stopPropagation()} style={{fontSize:10,fontWeight:700,color:'#3B82F6',background:'rgba(59,130,246,0.12)',border:'1px solid rgba(59,130,246,0.35)',borderRadius:6,padding:'3px 7px',textDecoration:'none'}}>🎬 Video</a>}
                     </div>
                     {/* Public Voice — Accept (verify=true) / Reject (verify=false) */}
                     {isVoice && (
-                      <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                      <div onClick={(e)=>e.stopPropagation()} style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
                         <button onClick={()=>!verified && verifyVoice(it.id, true)} disabled={verified}
                           style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:verified?'default':'pointer',opacity:verified?0.45:1}}>✅ Accept</button>
                         <button onClick={()=>verified && verifyVoice(it.id, false)} disabled={!verified}
@@ -2096,7 +2343,7 @@ function AdminDashboardScreen({ onBack }) {
                     )}
                     {/* Talent — unified admin CRUD: Accept (verify=true) / Reject (verify=false) / Delete */}
                     {isTalent && (
-                      <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
+                      <div onClick={(e)=>e.stopPropagation()} style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:8}}>
                         <button onClick={()=>!verified && !tbusy && verifyRecord('talent', trawId, true, 'talent', it.id)} disabled={verified || tbusy}
                           style={{fontSize:11,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#10B981,#047857)',border:'none',borderRadius:8,padding:'7px 12px',cursor:(verified||tbusy)?'default':'pointer',opacity:(verified||tbusy)?0.45:1}}>✅ Accept</button>
                         <button onClick={()=>verified && !tbusy && verifyRecord('talent', trawId, false, 'talent', it.id)} disabled={!verified || tbusy}
@@ -2259,7 +2506,20 @@ function AdminDashboardScreen({ onBack }) {
             </div>
           )}
           {usersErr && <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)',fontSize:12,color:'#EF4444'}}>{usersErr}</div>}
-          {usersLoading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading users…</div>}
+          {usersLoading && (
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} style={{...cardS,display:'flex',gap:12,alignItems:'center'}}>
+                  <SkeletonBox style={{ width:40, height:40, borderRadius:'50%', flexShrink:0 }} />
+                  <div style={{flex:1,minWidth:0}}>
+                    <SkeletonBox style={{ width:'55%', height:12, borderRadius:6 }} />
+                    <SkeletonBox style={{ width:'35%', height:10, borderRadius:5, marginTop:7 }} />
+                  </div>
+                  <SkeletonBox style={{ width:60, height:24, borderRadius:8, flexShrink:0 }} />
+                </div>
+              ))}
+            </div>
+          )}
           {!usersLoading && !usersErr && users.length === 0 && (
             <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>No users found.</div>
           )}
@@ -2401,30 +2661,98 @@ function AdminDashboardScreen({ onBack }) {
       );
     }
 
-    if (view === 'analytics') return (
-      <div>
-        <PeriodBar/>
-        <SecH>Content metrics — tap to drill down</SecH>
-        <MetricTiles onPick={(mk)=>pushDrill({type:'metric',metric:mk})}/>
-        <div style={{...cardS,background:T.bg3,marginTop:10,fontSize:11.5,color:T.textMuted,lineHeight:1.6}}>
-          Drill path: <b style={{color:T.text}}>State → Constituency → Citizen Reporter → Individual videos.</b> Tap any metric above to begin.
-        </div>
-        <SecH>Top categories</SecH>
-        {[['News',82,'#D0021B'],['Birthday',64,'#8B5CF6'],['Rental',47,'#3B82F6'],['Events',38,'#10B981'],['Vehicle',29,'#F59E0B']].map((b,i)=>(
-          <div key={i} style={{marginBottom:9}}>
-            <div style={{display:'flex',justifyContent:'space-between',fontSize:11.5,color:T.text,marginBottom:3}}>
-              <span>{b[0]}</span><span style={{color:T.textMuted}}>{b[1]}%</span>
-            </div>
-            <div style={{height:8,background:T.bg3,borderRadius:5,overflow:'hidden'}}>
-              <div style={{width:`${b[1]}%`,height:'100%',background:b[2],borderRadius:5}}/>
-            </div>
+    if (view === 'analytics') {
+      const rs = reportStats || {};
+      const bs = rs.byStatus || {};
+      const vb = (it) => it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
+      const uVer = (u) => u.is_verified === 1 || u.is_verified === true || u.is_verified === '1';
+      const clsVerified = classifieds.filter(vb).length;
+      const byType = {};
+      classifieds.forEach(it => { const t = String(it.type || 'other').toLowerCase(); byType[t] = (byType[t] || 0) + 1; });
+      const TYPE_LABEL = { birthday:'Birthday', anniversary:'Anniversary', marriage:'Marriage', whoiswho:'Who Is Who', event:'Events', events:'Events', job:'Jobs', jobs:'Jobs', vehicle:'Vehicle', carsales:'Vehicle', rent:'Rental', houserental:'Rental', shopping:'Shopping', other:'Other' };
+      const typeRows = Object.entries(byType).sort((a,b)=>b[1]-a[1]);
+      const maxType = typeRows.reduce((m,[,n])=>Math.max(m,n),0) || 1;
+      const talentN = feedData.talent?.items?.length || 0;
+      const voiceN  = feedData.voice?.items?.length || 0;
+      const vegN    = feedData.veg?.items?.length || 0;
+      const usersVerified = users.filter(uVer).length;
+      const roleCount = {};
+      users.forEach(u => { const r = String(u.role || 'user').toLowerCase(); roleCount[r] = (roleCount[r] || 0) + 1; });
+      const ROLE_LBL = { user:'Citizens', admin:'Admins', master_admin:'Master Admins', super_admin:'Super Admins', superadmin:'Super Admins' };
+      const ROLE_CLR = { user:'#6B7280', admin:'#3B82F6', master_admin:'#8B5CF6', super_admin:'#D0021B', superadmin:'#D0021B' };
+      const statusRows = ['new','read','approved','rejected','processing','done','published','failed']
+        .map(s => [s, Number(bs[s] || 0)]).filter(([,n]) => n > 0);
+      const maxStatus = statusRows.reduce((m,[,n])=>Math.max(m,n),0) || 1;
+      const loading = !reportStats && !classifieds.length && !users.length;
+      return (
+        <div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+            <SecH>Live platform totals</SecH>
+            <button onClick={()=>{ loadReportStats(); loadClassifieds(); loadUsers(); ['talent','voice','veg'].forEach(k=>loadFeed(k)); }}
+              style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
           </div>
-        ))}
-        <div style={{...cardS,background:T.bg3,marginTop:8,fontSize:11.5,color:T.textMuted,lineHeight:1.6}}>
-          ⚡ Counts are <b style={{color:T.text}}>precomputed</b> (content_filter_counts) — no slow live queries at 3,000-channel scale.
+          {loading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading live analytics…</div>}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:4}}>
+            <Stat label="Total Reports"      value={fmt(Number(rs.total||0))}    c="#0EA5E9"/>
+            <Stat label="Approved News"      value={fmt(Number(bs.approved||0))} c="#10B981"/>
+            <Stat label="Pending News"       value={fmt(Number(rs.new||0))}      c="#F59E0B"/>
+            <Stat label="Classifieds"        value={fmt(classifieds.length)}      c="#3B82F6"/>
+            <Stat label="Verified Listings"  value={fmt(clsVerified)}             c="#10B981"/>
+            <Stat label="Talent Clips"       value={fmt(talentN)}                 c="#8B5CF6"/>
+            <Stat label="Public Voice"       value={fmt(voiceN)}                  c="#D0021B"/>
+            <Stat label="Veg Items"          value={fmt(vegN)}                    c="#14B8A6"/>
+            <Stat label="Citizens"           value={fmt(users.length)}            c="#6366F1"/>
+          </div>
+
+          <SecH>News reports by status</SecH>
+          {statusRows.length === 0 ? (
+            <div style={{...cardS,fontSize:12,color:T.textMuted,textAlign:'center'}}>No report status data yet.</div>
+          ) : statusRows.map(([s,n],i)=>(
+            <div key={i} style={{marginBottom:9}}>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:11.5,color:T.text,marginBottom:3}}>
+                <span style={{textTransform:'capitalize'}}>{s}</span><span style={{color:T.textMuted}}>{fmt(n)}</span>
+              </div>
+              <div style={{height:8,background:T.bg3,borderRadius:5,overflow:'hidden'}}>
+                <div style={{width:`${Math.round(n/maxStatus*100)}%`,height:'100%',background:reportStatusColor(s),borderRadius:5}}/>
+              </div>
+            </div>
+          ))}
+
+          <SecH>Classifieds by category</SecH>
+          {typeRows.length === 0 ? (
+            <div style={{...cardS,fontSize:12,color:T.textMuted,textAlign:'center'}}>No classifieds loaded.</div>
+          ) : typeRows.map(([t,n],i)=>(
+            <div key={i} style={{marginBottom:9}}>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:11.5,color:T.text,marginBottom:3}}>
+                <span>{TYPE_LABEL[t] || t}</span><span style={{color:T.textMuted}}>{fmt(n)}</span>
+              </div>
+              <div style={{height:8,background:T.bg3,borderRadius:5,overflow:'hidden'}}>
+                <div style={{width:`${Math.round(n/maxType*100)}%`,height:'100%',background:'#3B82F6',borderRadius:5}}/>
+              </div>
+            </div>
+          ))}
+
+          <SecH>Users by role</SecH>
+          <div style={{...cardS,padding:0,overflow:'hidden'}}>
+            <KV k="Verified citizens" v={`${fmt(usersVerified)} / ${fmt(users.length)}`} vc="#10B981"/>
+            {Object.entries(roleCount).sort((a,b)=>b[1]-a[1]).map(([r,n],i)=>(
+              <KV key={i} k={ROLE_LBL[r] || r} v={fmt(n)} vc={ROLE_CLR[r] || T.text}/>
+            ))}
+            <div style={{padding:'4px 0'}}/>
+          </div>
+
+          {can('allIndiaAnalytics') && (<>
+            <SecH>Regional drill-down (illustrative sample)</SecH>
+            <div style={{...cardS,background:T.bg3,fontSize:11,color:T.textMuted,lineHeight:1.6}}>
+              The per-state / per-constituency / per-reporter drill below uses sample
+              data — it activates with real numbers once the regional analytics API is deployed.
+            </div>
+            <PeriodBar/>
+            <MetricTiles onPick={(mk)=>pushDrill({type:'metric',metric:mk})}/>
+          </>)}
         </div>
-      </div>
-    );
+      );
+    }
 
     if (view === 'pipeline') return (
       <div>
@@ -2604,24 +2932,83 @@ function AdminDashboardScreen({ onBack }) {
     );
 
     if (view === 'audit') {
-      const log = [
-        ['Koneti M.R.','Force-released slot 22:50','Khammam TV','2m ago'],
-        ['Ravi Kumar','Approved content','News · Kurnool','8m ago'],
-        ['Lakshmi Devi','Rejected (low quality)','Vehicle · Warangal','19m ago'],
-        ['Priya Senior','Created Admin "Karthik N"','Karnataka','1h ago'],
-        ['System','callback_lost → reconciled','content_5e2…','2h ago'],
-      ];
-      const shown = role==='admin' ? log.filter(l=>l[0]==='Ravi Kumar') : role==='master' ? log.filter(l=>l[0]!=='Koneti M.R.') : log;
+      // Real recent-activity feed assembled from the live data sources this
+      // dashboard already manages — citizen news reports, registered users, and
+      // contact/CRM submissions — merged and sorted newest-first. (A dedicated
+      // write-on-action audit table can replace this once deployed.)
+      const events = [];
+      reports.forEach(r => {
+        const ts = Date.parse(r.created_at || r.createdAt || '') || 0;
+        if (!ts) return;
+        const st = String(r.status || 'new').toLowerCase();
+        events.push({
+          ts, icon:'📰', color: reportStatusColor(st),
+          who: reportReporter(r),
+          what: `News report · ${st}`,
+          where: reportTitle(r),
+        });
+      });
+      users.forEach(u => {
+        const ts = Date.parse(u.created_at || u.createdAt || '') || 0;
+        if (!ts) return;
+        const ver = u.is_verified === 1 || u.is_verified === true || u.is_verified === '1';
+        events.push({
+          ts, icon:'👤', color: ver ? '#10B981' : '#F59E0B',
+          who: u.name || u.phone || u.email || 'User',
+          what: `Registered · ${ver ? 'verified' : 'pending verification'}`,
+          where: String(u.role || 'user').replace(/_/g,' '),
+        });
+      });
+      formSubs.forEach(s => {
+        if (!s._ts) return;
+        const cat = (FORM_CATS.find(c => c.key === s.category) || OTHER_CAT);
+        events.push({
+          ts: s._ts, icon: cat.icon, color: cat.c,
+          who: s.name || 'Anonymous',
+          what: `${cat.label} submission`,
+          where: s.details || '',
+        });
+      });
+      const shown = events.sort((a,b)=>b.ts-a.ts).slice(0, 80);
+      const anyLoading = reportsLoading || usersLoading || formsLoading;
       return (
         <div>
-          <div style={{...cardS,background:T.bg3,fontSize:11.5,color:T.textMuted}}>Scope: <b style={{color:T.text}}>{auditScope}</b></div>
-          {shown.map((l,i)=>(
-            <div key={i} style={cardS}>
-              <div style={{fontSize:12.5,fontWeight:700,color:T.text}}>{l[0]} <span style={{color:T.textMuted,fontWeight:400}}>· {l[3]}</span></div>
-              <div style={{fontSize:12,color:T.textMuted}}>{l[1]} — {l[2]}</div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+            <SecH>Recent activity {shown.length ? `· ${shown.length}` : ''}</SecH>
+            <button onClick={()=>{ loadReports(); loadUsers(); loadContacts(); }}
+              style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
+          </div>
+          <div style={{...cardS,background:T.bg3,fontSize:11.5,color:T.textMuted,lineHeight:1.6}}>
+            Scope: <b style={{color:T.text}}>{auditScope}</b> · merged from news reports, user registrations & form submissions.
+          </div>
+          {anyLoading && !shown.length && (
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} style={{...cardS,display:'flex',gap:11,alignItems:'center'}}>
+                  <SkeletonBox style={{ width:30, height:30, borderRadius:8, flexShrink:0 }} />
+                  <div style={{flex:1,minWidth:0}}>
+                    <SkeletonBox style={{ width:'45%', height:11, borderRadius:5 }} />
+                    <SkeletonBox style={{ width:'70%', height:10, borderRadius:5, marginTop:7 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!anyLoading && shown.length === 0 && (
+            <div style={{textAlign:'center',color:T.textMuted,fontSize:12,padding:'30px 0'}}>No recent activity found.</div>
+          )}
+          {shown.map((e,i)=>(
+            <div key={i} style={{...cardS,display:'flex',gap:11,alignItems:'flex-start'}}>
+              <div style={{fontSize:18,flexShrink:0,lineHeight:1.3}}>{e.icon}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:700,color:T.text}}>
+                  {e.who} <span style={{color:T.textMuted,fontWeight:400}}>· {fmtAge(new Date(e.ts).toISOString())}</span>
+                </div>
+                <div style={{fontSize:12,color:e.color,fontWeight:600,marginTop:1}}>{e.what}</div>
+                {e.where && <div style={{fontSize:11.5,color:T.textMuted,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{e.where}</div>}
+              </div>
             </div>
           ))}
-          {shown.length===0 && <div style={{textAlign:'center',color:T.textMuted,fontSize:12,padding:'30px 0'}}>No entries in your scope.</div>}
         </div>
       );
     }

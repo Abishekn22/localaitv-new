@@ -678,14 +678,13 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               {/* divider */}
               <div style={{height:8, background:'#FAFBFC'}}/>
 
-              {/* Group 2: Dashboard + Profile */}
+              {/* Group 2: Profile */}
               {[
-                { icon:'dashboard', label:'Dashboard',   action:'dashboard', color:'#D0021B' },
                 { icon:'user',      label:'My Profile',  action:'profile',   color:'#D0021B' },
               ].map((m,i,arr)=>(
                 <MenuRow key={`g2-${i}`} item={m}
                   isLast={i===arr.length-1}
-                  onClick={()=>{ setShowHamburger(false); try { window.__openHamburgerOnLoad = true; } catch(e){} if(m.action){ const dest = (m.action==='dashboard' && !isAuthenticated) ? 'profile' : m.action; onNavigate(dest); } }}/>
+                  onClick={()=>{ setShowHamburger(false); try { window.__openHamburgerOnLoad = true; } catch(e){} if(m.action){ onNavigate(m.action); } }}/>
               ))}
 
               {/* divider */}

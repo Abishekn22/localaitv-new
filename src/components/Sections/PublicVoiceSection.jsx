@@ -41,9 +41,19 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
   // Show ONLY admin-approved (verified) videos for the selected location. No
   // fallback to other locations — if this location has no verified videos the
   // section hides itself entirely (see the items.length === 0 guard below).
-  const items = locationId != null
+  const scoped = locationId != null
     ? verified.filter(it => String(it.location_id) === String(locationId))
     : verified;
+  // Dedupe by id / request_id so a reel that the API returns twice doesn't
+  // render twice in the rail (and 6× once the carousel triples for looping).
+  const _seenKeys = new Set();
+  const items = scoped.filter(it => {
+    const k = it.id != null ? `id:${it.id}` : (it.request_id != null ? `rid:${it.request_id}` : null);
+    if (k == null) return true;
+    if (_seenKeys.has(k)) return false;
+    _seenKeys.add(k);
+    return true;
+  });
 
   const CARD_W = 116;                  // 108 + marginRight:8
   const cycleW = items.length * CARD_W;

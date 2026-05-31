@@ -9,6 +9,8 @@
    commented out — keep it as a fallback reference. */
 
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+/* SkeletonBox: make the react-loading-skeleton container fill its sized parent */
+.skbox-fill, .skbox-fill > span { display:block; position:absolute; inset:0; line-height:1; }
 @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes soundBar1 { from{height:4px} to{height:14px} }

@@ -44,7 +44,7 @@ const DEFAULT_SERVICE = 'main';
 // Anything not listed here is served by DEFAULT_SERVICE. Longest match wins.
 const ROUTES = {
   '/classifieds':    'aiservices',
-  '/feed':           'aiservices',  // /feed/vegetables, /feed/talent, /feed/public-voice, /feed/guests
+  '/feed':           'aiservices',  // /feed/vegetables, /feed/talent, /feed/public-voice
   '/public-voice-requests': 'aiservices',  // GET list/detail of public-voice submissions
   // /utility/trains, /utility/veg-prices, /utility/bullion — all served by
   // form_server/utility_feed.py on the aimodelsss (aiservices) backend.

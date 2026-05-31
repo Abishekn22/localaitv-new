@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import Skeleton, { SkeletonTheme } from 'react-loading-skeleton';
+import 'react-loading-skeleton/dist/skeleton.css';
 import { T, ACCENT, SEC, OTT, useAppTheme, useReveal, Reveal } from '../_imports.js';
 
 // ── LOCATION PIN — 3D red map pin SVG (module-level, used everywhere) ──
@@ -39,23 +41,26 @@ function LocationPin({ size = 28, glow = false, gold = false }) {
 }
 
 
-// ── SkeletonBox — shimmer placeholder for loading states ──
+// ── SkeletonBox — themed wrapper around react-loading-skeleton ──
+// Keeps the original API (a single `style` prop carrying width/height/
+// borderRadius/margins/paddingBottom) so every existing call site upgrades to
+// the library animation with no changes. The caller's `style` sizes an outer
+// box (so aspect-ratio boxes using height:0 + paddingBottom still work) and a
+// react-loading-skeleton fills it, inheriting the rounded corners.
 function SkeletonBox({ style = {} }) {
   const { T } = useAppTheme();
+  const base = T.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
+  const high = T.isDark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.65)';
+  const radius = style.borderRadius != null ? style.borderRadius : 8;
   return (
-    <div style={{
-      background: T.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)',
-      borderRadius: 8,
-      overflow: 'hidden',
-      position: 'relative',
-      ...style,
-    }}>
-      <div style={{
-        position: 'absolute', inset: 0,
-        background: `linear-gradient(90deg, transparent 0%, ${T.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.6)'} 50%, transparent 100%)`,
-        animation: 'shimmer 1.4s infinite',
-      }}/>
-    </div>
+    <SkeletonTheme baseColor={base} highlightColor={high}>
+      <div style={{ position:'relative', overflow:'hidden', ...style, borderRadius:radius, background:'transparent' }}>
+        <Skeleton
+          containerClassName="skbox-fill"
+          style={{ position:'absolute', inset:0, width:'100%', height:'100%', borderRadius:'inherit', lineHeight:1, transform:'none' }}
+        />
+      </div>
+    </SkeletonTheme>
   );
 }
 
