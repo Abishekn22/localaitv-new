@@ -57,22 +57,20 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     badge: '📢 పబ్లిక్ వాయిస్',
   }));
 
-  // Show only the SELECTED location's items: match on location_id. Null-location
-  // rows (already name-scoped by the API) are kept; any cross-location row is
-  // dropped. location_id is nullable per the API.
-  // Only admin-approved (verified) classifieds reach the home page — every
-  // /classifieds card now carries `verified` (classifieds_feed.py). Unverified
-  // submissions are hidden until an admin accepts them in the moderation queue.
+  // Home page shows ONLY real API content for the SELECTED location that an
+  // admin has approved — across every catalog/category. Two hard rules:
+  //   1. verified === true  (unverified submissions stay hidden until approved)
+  //   2. location_id === the selected dropdown's location id (exact match)
+  // No static CLASSIFIEDS mock is mixed in or used as a fallback; if nothing
+  // matches, the strip is simply empty.
   const allLive = (Array.isArray(liveClassifieds) ? liveClassifieds : [])
     .filter(c => c.verified === true || c.verified === 'true' || c.verified === 1 || c.verified === '1');
   const liveItems = locationId != null
-    ? allLive.filter(c => c.location_id == null || String(c.location_id) === String(locationId))
+    ? allLive.filter(c => String(c.location_id) === String(locationId))
     : allLive;
-  // Categories that now have LIVE data — their static mock is dropped.
-  const liveCats  = new Set([...liveItems.map(c => c.cat), ...(pvCards.length ? ['Public Voice'] : [])]);
-  const all = (liveItems.length > 0 || pvCards.length > 0)
-    ? [...liveItems, ...pvCards, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
-    : CLASSIFIEDS;
+  // Only verified, location-matched API content: live classifieds + verified
+  // Public Voice cards (pvCards is already verified + location-scoped above).
+  const all = [...liveItems, ...pvCards];
 
   // Randomly shuffle for display on home page — memoised so it doesn't re-shuffle on every re-render
   const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);

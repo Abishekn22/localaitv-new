@@ -1689,7 +1689,8 @@ function AdminDashboardScreen({ onBack }) {
     }, [passed, kind, classifieds, feedData]);
     const it = live;
     const isTalent = kind === 'talent';
-    const imgs = isTalent ? [] : (Array.isArray(it.images) ? it.images.filter(Boolean) : (it.image ? [it.image] : []));
+    const isVoice = kind === 'voice';
+    const imgs = (isTalent || isVoice) ? [] : (Array.isArray(it.images) ? it.images.filter(Boolean) : (it.image ? [it.image] : []));
     const vids = Array.isArray(it.videos) ? it.videos.filter(Boolean) : [];
     const verified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
     const st = String(it.status || '').trim();
@@ -2285,7 +2286,7 @@ function AdminDashboardScreen({ onBack }) {
               return (
                 <div key={it.id || i} onClick={()=>pushDrill({type:'catalogdetail', kind:reportCategory, item:it, category:reportCategory})}
                   style={{...cardS, display:'flex', gap:11, alignItems:'flex-start', cursor:'pointer'}}>
-                  {isTalent
+                  {(isTalent || isVoice)
                     ? (vids[0]
                         ? <video src={`${vids[0]}#t=0.1`} muted autoPlay loop playsInline preload="metadata"
                             style={{width:64,height:64,borderRadius:9,flexShrink:0,objectFit:'cover',background:'#000',border:`1px solid ${T.border}`}}
