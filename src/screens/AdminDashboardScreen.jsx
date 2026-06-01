@@ -92,7 +92,11 @@ function AdminDashboardScreen({ onBack }) {
   const loadClassifieds = useCallback(async () => {
     setClassifiedsLoading(true); setClassifiedsErr('');
     try {
-      const d = await apiCall('/classifieds?limit=100');
+      // Admin/moderation view: include_unrendered=1 surfaces submissions that
+      // don't yet have a generated bulletin video (e.g. pending marriages /
+      // events / jobs). The public home feed omits this flag, so it still only
+      // shows finished, rendered cards.
+      const d = await apiCall('/classifieds?limit=100&include_unrendered=1');
       setClassifieds(d.items || d.data || (Array.isArray(d) ? d : []));
       setClassifiedsLoaded(true);
     } catch (e) { setClassifiedsErr(e.message || 'Failed to load classifieds'); }
