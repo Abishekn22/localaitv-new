@@ -103,11 +103,11 @@ function AdminDashboardScreen({ onBack }) {
     finally { setClassifiedsLoading(false); }
   }, []);
 
-  // Per-category feeds (veg / talent / public-voice) — lazy-loaded.
-  const FEED_ENDPOINT = { veg: '/feed/vegetables', talent: '/feed/talent', voice: '/public-voice-requests' };
+  // Per-category feeds (talent / public-voice) — lazy-loaded.
+  const FEED_ENDPOINT = { talent: '/feed/talent', voice: '/public-voice-requests' };
   const [feedData, setFeedData] = useState({}); // catKey -> { items, loading, err, loaded }
   const loadFeed = useCallback(async (catKey) => {
-    const path = ({ veg:'/feed/vegetables', talent:'/feed/talent', voice:'/public-voice-requests' })[catKey];
+    const path = ({ talent:'/feed/talent', voice:'/public-voice-requests' })[catKey];
     if (!path) return;
     setFeedData(prev => ({ ...prev, [catKey]: { ...(prev[catKey] || {}), loading: true, err: '' } }));
     try {
@@ -328,7 +328,7 @@ function AdminDashboardScreen({ onBack }) {
   useEffect(() => {
     if (view === 'analytics') {
       loadReportStats(); loadClassifieds(); loadUsers();
-      ['talent','voice','veg'].forEach(k => {
+      ['talent','voice'].forEach(k => {
         if (!feedData[k]?.loaded && !feedData[k]?.loading) loadFeed(k);
       });
     }
@@ -1695,7 +1695,10 @@ function AdminDashboardScreen({ onBack }) {
     const isTalent = kind === 'talent';
     const isVoice = kind === 'voice';
     const imgs = (isTalent || isVoice) ? [] : (Array.isArray(it.images) ? it.images.filter(Boolean) : (it.image ? [it.image] : []));
-    const vids = Array.isArray(it.videos) ? it.videos.filter(Boolean) : [];
+    // Shopping & House Rentals: hide the generated "output_video" — admins
+    // review these listings by photos only, so we suppress the video entirely.
+    const hideOutputVideo = it.type === 'shopping' || it.type === 'rent';
+    const vids = (!hideOutputVideo && Array.isArray(it.videos)) ? it.videos.filter(Boolean) : [];
     const verified = it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1';
     const st = String(it.status || '').trim();
     const sc = /pending/i.test(st) ? '#F59E0B' : /approv|publish/i.test(st) ? '#10B981' : /reject/i.test(st) ? '#EF4444' : '#6B7280';
@@ -2074,7 +2077,6 @@ function AdminDashboardScreen({ onBack }) {
         { key:'vehicle',     label:'Vehicle',      icon:'🚗' },
         { key:'rental',      label:'Rental',       icon:'🏠' },
         { key:'shopping',    label:'Shopping',     icon:'🛍️' },
-        { key:'veg',         label:'Veg Prices',   icon:'🥦' },
         { key:'talent',      label:'Talent',       icon:'🎭' },
         { key:'voice',       label:'Public Voice', icon:'📢' },
       ];
@@ -2804,7 +2806,6 @@ function AdminDashboardScreen({ onBack }) {
       const maxType = typeRows.reduce((m,[,n])=>Math.max(m,n),0) || 1;
       const talentN = feedData.talent?.items?.length || 0;
       const voiceN  = feedData.voice?.items?.length || 0;
-      const vegN    = feedData.veg?.items?.length || 0;
       const usersVerified = users.filter(uVer).length;
       const roleCount = {};
       users.forEach(u => { const r = String(u.role || 'user').toLowerCase(); roleCount[r] = (roleCount[r] || 0) + 1; });
@@ -2818,7 +2819,7 @@ function AdminDashboardScreen({ onBack }) {
         <div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
             <SecH>Live platform totals</SecH>
-            <button onClick={()=>{ loadReportStats(); loadClassifieds(); loadUsers(); ['talent','voice','veg'].forEach(k=>loadFeed(k)); }}
+            <button onClick={()=>{ loadReportStats(); loadClassifieds(); loadUsers(); ['talent','voice'].forEach(k=>loadFeed(k)); }}
               style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 10px',cursor:'pointer'}}>↻ Refresh</button>
           </div>
           {loading && <div style={{...cardS,textAlign:'center',color:T.textMuted,fontSize:12}}>Loading live analytics…</div>}
@@ -2830,7 +2831,6 @@ function AdminDashboardScreen({ onBack }) {
             <Stat label="Verified Listings"  value={fmt(clsVerified)}             c="#10B981"/>
             <Stat label="Talent Clips"       value={fmt(talentN)}                 c="#8B5CF6"/>
             <Stat label="Public Voice"       value={fmt(voiceN)}                  c="#D0021B"/>
-            <Stat label="Veg Items"          value={fmt(vegN)}                    c="#14B8A6"/>
             <Stat label="Citizens"           value={fmt(users.length)}            c="#6366F1"/>
           </div>
 
