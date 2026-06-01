@@ -36,7 +36,8 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
   );
 
   const filtered = useMemo(() => {
-    // For categories with live rows, use ONLY live; keep mock for the rest.
+    // Live data only — no bundled mock fallback. The empty-state below renders
+    // when the API returns nothing.
     const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
     // Only admin-approved (verified) talent videos, shaped like a classified.
     const talentItems = (Array.isArray(liveTalent) ? liveTalent : [])
