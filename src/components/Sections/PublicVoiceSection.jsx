@@ -56,8 +56,19 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
   });
 
   const CARD_W = 116;                  // 108 + marginRight:8
-  const cycleW = items.length * CARD_W;
-  const looped = items.length ? [...items, ...items, ...items] : [];   // 3 copies
+  const baseW = items.length * CARD_W; // width of one pass over the real items
+  // The buffer-zone wrap below fires at 2× the cycle width, but the browser
+  // caps scrollLeft at (3×cycle − viewport). When there are only a few items
+  // one cycle is narrower than the screen, so that cap sits BELOW the wrap point
+  // → scrollLeft can never reach it, the wrap never happens, and the rail stops
+  // dead at the end. Repeat the items enough that one cycle copy is always wider
+  // than the viewport, so the wrap is always reachable and the loop never stops.
+  const viewportW = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 480;
+  const reps = items.length ? Math.max(1, Math.ceil((viewportW + CARD_W) / baseW)) : 1;
+  const unit = [];
+  for (let r = 0; r < reps; r++) unit.push(...items);
+  const cycleW = unit.length * CARD_W; // == reps × baseW, guaranteed > viewport
+  const looped = items.length ? [...unit, ...unit, ...unit] : [];   // 3 copies
 
   function openCard(item) {
     // Hand the LIVE (already location-filtered) items to the fullscreen viewer,
