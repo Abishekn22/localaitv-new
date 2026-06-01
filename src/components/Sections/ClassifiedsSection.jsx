@@ -127,16 +127,18 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);
   const filtered = cat === 'All' ? shuffled : all.filter(c => c.cat === cat);
 
-  // Auto-scroll the strip continuously, like Mana Kurnool Shorts.
-  // We render the filtered items TWICE in a row, then loop scrollLeft from 0 → half → 0,
-  // so the transition is seamless (no jump when looping).
+  // Auto-scroll the strip continuously. The list is rendered ONCE (each post
+  // appears a single time — no duplicates). When the scroll reaches the end we
+  // wrap back to the start so the motion never stops; if everything already
+  // fits on screen there's simply nothing to scroll.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const iv = setInterval(() => {
       if (!el || paused) return;
-      const half = el.scrollWidth / 2;
-      if (el.scrollLeft >= half) el.scrollLeft -= half;
+      const max = el.scrollWidth - el.clientWidth;
+      if (max <= 0) return;            // content fits — nothing to scroll
+      if (el.scrollLeft >= max - 1) el.scrollLeft = 0; // reached the end → loop
       else el.scrollLeft += 1;
     }, 30);
     return () => clearInterval(iv);
@@ -277,11 +279,10 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
               </div>
             </div>
           ))}
-          {/* Always render the list TWICE so the strip can loop forever — the
-              auto-scroll resets scrollLeft by exactly half (scrollWidth/2), so a
-              doubled list gives a seamless, never-ending scroll no matter how
-              few items there are (even 1 card keeps drifting continuously). */}
-          {!showSkeleton && filtered.length > 0 && [...filtered, ...filtered].map((cl,i)=>{
+          {/* Render the list ONCE — every post shows a single time (no
+              duplicates). The auto-scroll wraps back to the start at the end so
+              the strip keeps moving without repeating cards. */}
+          {!showSkeleton && filtered.length > 0 && filtered.map((cl,i)=>{
             // Use the REAL generated bulletin video as the thumbnail. Drop
             // malformed S3 keys (Windows-path uploads) so a broken URL can't
             // leave a black box — fall back to a real photo, then the category
