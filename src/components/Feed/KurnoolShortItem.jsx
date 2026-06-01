@@ -151,7 +151,7 @@ function KurnoolShortItem({ item, isActive, onShare, onBell }) {
               loop
               playsInline
               controls={false}
-              preload="metadata"
+              preload="auto"
               style={{ width:'100%', height:'100%', objectFit:'cover',
                 background:'#000', display:'block' }}
             />

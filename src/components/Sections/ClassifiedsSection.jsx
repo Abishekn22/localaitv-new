@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, safeImageUrl, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
 
 import ClassifiedsFeedScreen from './../../screens/ClassifiedsFeedScreen.jsx';
+import { isBrokenKey } from './../Feed/ImageSlideshowPlayer.jsx';
 import SectionAccentBar from './../SectionAccentBar.jsx';
 import { CL_CATS_TE } from './../../data/classifieds.js';
 import { publicVoiceToShortShape } from './ShortNewsSection.jsx';
@@ -57,6 +58,44 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     badge: '📢 పబ్లిక్ వాయిస్',
   }));
 
+  // Talent Show — its own feed API (/feed/talent). Only ADMIN-VERIFIED items,
+  // scoped to the selected location. Same retrying-fetch pattern as Public
+  // Voice (a fresh load double-mounts and aborts in-flight requests, which
+  // would otherwise leave Talent Show permanently empty).
+  const [talentData, setTalentData] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    let tries = 0;
+    const load = () => {
+      if (!alive) return;
+      apiCall('/feed/talent')
+        .then(d => { if (alive) setTalentData((d && d.items) || (Array.isArray(d) ? d : [])); })
+        .catch(() => { if (alive && tries < 6) { tries += 1; setTimeout(load, 700); } });
+    };
+    load();
+    return () => { alive = false; };
+  }, []);
+  // Only admin-approved (verified) talent videos, scoped to the selected
+  // location. Mirrors the dashboard's /feed/talent verified set.
+  const talentVerified = (Array.isArray(talentData) ? talentData : [])
+    .filter(it => it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1')
+    .filter(it => locationId == null || String(it.location_id) === String(locationId));
+  // Map verified Talent Show → classifieds-card shape so the "Talent Show"
+  // category tile renders the real uploaded video (not a static mock).
+  const talentCards = talentVerified.map(tv => ({
+    id: String(tv.id),               // already prefixed "talent33" by the feed
+    cat: 'Talent Show',
+    type: 'talent',
+    title: tv.title || tv.performerName || tv.performer_name || 'Talent Show',
+    images: (Array.isArray(tv.images) && tv.images.length) ? tv.images : [],
+    videos: Array.isArray(tv.videos) ? tv.videos.filter(Boolean) : [],
+    location: tv.location || '',
+    time: tv.time || '',
+    date: tv.date || '',
+    badge: '🎤 ' + (tv.eventName || tv.event_name || 'Talent Show'),
+    uploadedAt: tv.uploadedAt || tv.uploaded_at || '',
+  }));
+
   // Home page shows ONLY real API content for the SELECTED location that an
   // admin has approved — across every catalog/category. Two hard rules:
   //   1. verified === true  (unverified submissions stay hidden until approved)
@@ -69,8 +108,9 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     ? allLive.filter(c => String(c.location_id) === String(locationId))
     : allLive;
   // Only verified, location-matched API content: live classifieds + verified
-  // Public Voice cards (pvCards is already verified + location-scoped above).
-  const all = [...liveItems, ...pvCards];
+  // Public Voice cards + verified Talent Show cards (each list is already
+  // verified + location-scoped above).
+  const all = [...liveItems, ...pvCards, ...talentCards];
 
   // Randomly shuffle for display on home page — memoised so it doesn't re-shuffle on every re-render
   const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);
@@ -195,7 +235,14 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
           {/* Duplicate the list only when there are enough cards to actually
               scroll — keeps the seamless auto-scroll loop for long lists while
               avoiding a visible repeat for short ones. */}
-          {(filtered.length > 7 ? [...filtered, ...filtered] : filtered).map((cl,i)=>(
+          {(filtered.length > 7 ? [...filtered, ...filtered] : filtered).map((cl,i)=>{
+            // Use the REAL generated bulletin video as the thumbnail. Drop
+            // malformed S3 keys (Windows-path uploads) so a broken URL can't
+            // leave a black box — fall back to a real photo, then the category
+            // image only as a last resort.
+            const vid = (Array.isArray(cl.videos) ? cl.videos : []).find(u => !isBrokenKey(u)) || null;
+            const img = (Array.isArray(cl.images) ? cl.images : []).find(u => !isBrokenKey(u)) || null;
+            return (
             <div key={cl.id+'-'+i} onClick={()=>openItem(cl)}
               style={{flexShrink:0,width:155,borderRadius:14,overflow:'hidden',
                 border:`1px solid ${T.border}`,cursor:'pointer',
@@ -206,26 +253,29 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
               onTouchStart={e=>e.currentTarget.style.transform='scale(0.97)'}
               onTouchEnd={e=>e.currentTarget.style.transform='scale(1)'}
             >
-              {/* Thumbnail — Public Voice shows the video's first frame; others the image */}
+              {/* Thumbnail — the live bulletin video plays muted/looped as a
+                  moving preview; only items with no usable video fall back to a
+                  photo. */}
               <div style={{width:'100%',height:100,position:'relative',overflow:'hidden',
                 background:T.bg3}}>
-                {Array.isArray(cl.videos) && cl.videos[0] ? (
+                {vid ? (
                   <video
-                    src={cl.videos[0]}
-                    muted playsInline preload="metadata"
+                    src={vid + '#t=0.1'}
+                    poster={img ? safeImageUrl(img) : undefined}
+                    muted loop autoPlay playsInline preload="metadata"
                     style={{width:'100%',height:'100%',objectFit:'cover',display:'block',background:'#000'}}
                     onError={e=>{ e.target.style.display='none'; }}
                   />
                 ) : (
                   <img
-                    src={safeImageUrl((Array.isArray(cl.images) && cl.images[0]) || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events'])}
+                    src={safeImageUrl(img || CL_CAT_IMG[cl.cat] || CL_CAT_IMG['Events'])}
                     alt={cl.cat}
                     style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}
                     onError={e=>{ if (e.target.src.endsWith('/placeholder.svg')) return; e.target.src = '/placeholder.svg'; }}
                   />
                 )}
                 {/* Play badge for video cards */}
-                {Array.isArray(cl.videos) && cl.videos[0] && (
+                {vid && (
                   <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
                     width:30,height:30,borderRadius:'50%',background:'rgba(255,255,255,0.9)',
                     display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
@@ -262,7 +312,7 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
                 </div>
               </div>
             </div>
-          ))}
+          );})}
           {/* "Post Free Ad" CTA removed per user request — strip now loops continuously */}
         </div>
       </div>

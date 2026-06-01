@@ -27,17 +27,31 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
     () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=50`).then(d => d.items || d),
     [], [constituency]
   );
+  // Talent Show has its own feed endpoint (not part of /classifieds). Pull it
+  // here so tapping a Talent card on the home strip lands on the REAL verified
+  // video instead of the static mock.
+  const { data: liveTalent } = useAPI(
+    () => apiCall('/feed/talent').then(d => d.items || d),
+    [], []
+  );
 
   const filtered = useMemo(() => {
     // For categories with live rows, use ONLY live; keep mock for the rest.
     const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
-    const liveCats  = new Set(liveItems.map(c => c.cat));
-    const source = liveItems.length > 0
-      ? [...liveItems, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
+    // Only admin-approved (verified) talent videos, shaped like a classified.
+    const talentItems = (Array.isArray(liveTalent) ? liveTalent : [])
+      .filter(it => it.verified === true || it.verified === 'true' || it.verified === 1 || it.verified === '1')
+      .map(tv => ({ ...tv, cat: 'Talent Show', type: 'talent' }));
+    const live = [...liveItems, ...talentItems];
+    // Categories that have live rows replace their mock entirely (so verified
+    // Talent Show hides the ts1–ts3 placeholders once real talent exists).
+    const liveCats  = new Set(live.map(c => c.cat));
+    const source = live.length > 0
+      ? [...live, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
       : CLASSIFIEDS;
     const items = activeCat === 'All' ? source : source.filter(c => c.cat === activeCat);
     return [...items].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
-  }, [activeCat, liveClassifieds]);
+  }, [activeCat, liveClassifieds, liveTalent]);
 
   const total   = filtered.length;
   const safeIdx = total > 0 ? ((curIdx % total) + total) % total : 0;

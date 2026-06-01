@@ -177,17 +177,18 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
             <div style={{ width:108, height:192, borderRadius:10, overflow:'hidden',
               background:'#111', position:'relative' }}>
               {hasVideo ? (
-                // Show only the first frame as a lightweight thumbnail. We append
-                // a #t=0.1 media fragment and preload="metadata" so the browser
-                // fetches just enough to paint the first frame — it never streams
-                // or autoplays the whole clip. The full video plays on click
-                // (openCard → fullscreen feed). This stops the section from
-                // stalling while every clip in the row downloads.
+                // Use the live uploaded video as the thumbnail itself — autoplay
+                // muted/looped silently. `preload="metadata"` + `#t=0.1` reliably
+                // renders black on most mobile browsers (the first frame never
+                // gets decoded without playback), so we just play it. Tap →
+                // fullscreen feed for the full clip with audio.
                 <video
-                  src={`${s.videos[0]}#t=0.1`}
+                  src={s.videos[0]}
                   muted
+                  autoPlay
+                  loop
                   playsInline
-                  preload="metadata"
+                  preload="auto"
                   draggable={false}
                   style={{ width:'100%', height:'100%', objectFit:'cover', pointerEvents:'none', background:'#000' }}
                   onError={e => { e.target.style.display = 'none'; }}

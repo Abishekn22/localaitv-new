@@ -56,11 +56,13 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
       <div style={{ width:'100%', height:'100%', position:'relative', background:'#000' }}>
         <video
           src={safeVideos[0]}
+          poster={safeImages[0] || undefined}
           autoPlay={isActive}
           muted
           loop
           playsInline
           controls
+          preload="auto"
           style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', background:'#000' }}
           onError={e => { e.target.style.display='none'; }}
         />
@@ -180,5 +182,5 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
 
 // ── Single Classified Feed Item ─────────────────────────────
 
-export { ImageSlideshowPlayer };
+export { ImageSlideshowPlayer, isBrokenKey };
 export default ImageSlideshowPlayer;
