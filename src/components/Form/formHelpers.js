@@ -30,18 +30,40 @@ function genComplianceId(typeCode) {
   return `LAI-${typeCode}-${ymd}-${rand}`;
 }
 
+// Upload each file to /api/upload-file and return the resulting URLs.
+// IMPORTANT: this no longer swallows failures. A failed upload (too large,
+// server error, network drop, missing URL) THROWS so the calling form can show
+// the user a real error instead of silently submitting a record with no media.
+const MAX_UPLOAD_BYTES = 450 * 1024 * 1024; // 450 MB — safety margin under nginx 500M
+
 async function uploadPhotos(files, reqId, relatedType) {
   const urls = [];
   for (const file of files) {
+    // Client-side guard so the user gets instant feedback instead of waiting
+    // for a long upload only to hit the server's size cap.
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`"${file.name}" is too large (${Math.round(file.size / 1024 / 1024)} MB). Maximum is 450 MB.`);
+    }
     const fd = new FormData();
     fd.append('file', file);
     fd.append('broadcast_request_id', reqId);
     fd.append('related_type', relatedType);
+    let r;
     try {
-      const r = await fetch(`${API}/upload-file`, { method:'POST', body:fd });
-      const d = await r.json();
-      if (d.file_url) urls.push(d.file_url);
-    } catch(e) { /* continue */ }
+      r = await fetch(`${API}/upload-file`, { method:'POST', body:fd });
+    } catch (e) {
+      throw new Error('Upload failed — please check your connection and try again.');
+    }
+    if (!r.ok) {
+      throw new Error(r.status === 413
+        ? 'Video is too large for the server. Please upload a shorter or smaller file.'
+        : `Upload failed (server error ${r.status}). Please try again.`);
+    }
+    const d = await r.json().catch(() => null);
+    if (!d || !d.file_url) {
+      throw new Error('Upload did not complete — no file URL was returned. Please try again.');
+    }
+    urls.push(d.file_url);
   }
   return urls;
 }

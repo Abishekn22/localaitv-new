@@ -1704,6 +1704,14 @@ function AdminDashboardScreen({ onBack }) {
       : (typeof it.duration_seconds === 'number' ? it.duration_seconds : null);
     const close = () => setDrill(d => d.slice(0, -1));
 
+    // ── Content-edit state (all catalogs) ──
+    const [editing, setEditing]         = useState(false);
+    const [rawRec, setRawRec]           = useState(null); // raw DB columns from /admin/{resource}/{id}
+    const [editVals, setEditVals]       = useState({});   // column -> current string value
+    const [editLoading, setEditLoading] = useState(false);
+    const [editSaving, setEditSaving]   = useState(false);
+    const [editErr, setEditErr]         = useState('');
+
     // Decide which action set this kind uses.
     const cres = kind === 'classifieds' ? resourceForType(it.type) : (kind === 'talent' ? 'talent' : null);
     const crawId = kind === 'classifieds'
@@ -1714,6 +1722,75 @@ function AdminDashboardScreen({ onBack }) {
     // update. Match the inline card: feeds → 'talent'/'voice'/'veg', classifieds
     // → the active reportCategory the user came from.
     const catKey = kind === 'classifieds' ? (category || it.cat || it.type) : kind;
+
+    // ── Which admin resource + raw row id this item maps to for editing. ──
+    // Public-voice (its own read API) and veg (no admin table) resolve here too:
+    // public-voice IS registered in the backend admin RESOURCES, so it can be
+    // edited via the same /admin/{resource}/{id} PATCH; veg has no admin table
+    // so editing is disabled for it.
+    const editResource = kind === 'classifieds' ? resourceForType(it.type)
+      : kind === 'talent' ? 'talent'
+      : kind === 'voice'  ? 'public-voice'
+      : null;
+    const editRawId = kind === 'classifieds' ? rawIdForType(it.type, it.id)
+      : kind === 'talent' ? String(it.id == null ? '' : it.id).replace(/^talent/, '')
+      : kind === 'voice'  ? String(it.id == null ? '' : it.id).replace(/^pv-?/, '')
+      : null;
+    const canEdit = !!editResource && editRawId != null && editRawId !== '';
+
+    // System / workflow / media columns the content editor must never touch —
+    // mirrors the backend's _PROTECTED_UPDATE_COLS so the form only shows fields
+    // that will actually persist.
+    const HIDE_EDIT = new Set(['id','verified','status','output_video','request_id',
+      'external_id','location_id','created_at','received_at','imported_at','updated_at','media']);
+    const isMediaKey = (k) => /(_video|_photos?|_uris|_keys?|_paths|photo|image|voice_s3)/i.test(k);
+    const editableEntries = (rec) => Object.entries(rec || {}).filter(([k, v]) =>
+      !HIDE_EDIT.has(k) && !isMediaKey(k) &&
+      (typeof v === 'string' || typeof v === 'number' || v === null));
+
+    // Pull the raw row, prefill the form.
+    const startEdit = async () => {
+      if (!canEdit) { setEditErr('This catalog type can’t be edited.'); setEditing(true); return; }
+      setEditing(true); setEditErr(''); setEditLoading(true);
+      try {
+        const d = await apiCall(`/admin/${editResource}/${editRawId}`);
+        const rec = (d && d.item) ? d.item : d; // admin_get returns the serialized row directly
+        setRawRec(rec);
+        const vals = {};
+        editableEntries(rec).forEach(([k, v]) => { vals[k] = v == null ? '' : String(v); });
+        setEditVals(vals);
+      } catch (e) {
+        setEditErr(String(e.message || '').includes('404')
+          ? 'Edit not available — the admin record API isn’t deployed yet (404).'
+          : (e.message || 'Failed to load record for editing.'));
+      } finally { setEditLoading(false); }
+    };
+
+    // PATCH only the changed columns, then refresh the source feed.
+    const saveEdit = async () => {
+      if (!canEdit || !rawRec) return;
+      const changed = {};
+      Object.keys(editVals).forEach(k => {
+        const orig = rawRec[k] == null ? '' : String(rawRec[k]);
+        if (editVals[k] !== orig) changed[k] = editVals[k];
+      });
+      if (!Object.keys(changed).length) { setEditing(false); return; }
+      setEditSaving(true); setEditErr('');
+      try {
+        await apiCall(`/admin/${editResource}/${editRawId}`, {
+          method: 'PATCH', body: JSON.stringify(changed),
+        });
+        // Re-pull the source list so the read view reflects the saved edits.
+        if (kind === 'classifieds') loadClassifieds();
+        else loadFeed(kind);
+        setEditing(false);
+      } catch (e) {
+        const code = String(e.message || '');
+        setEditErr(code.includes('405') || code.includes('404')
+          ? 'Save failed — the edit endpoint (PATCH /api/admin/{resource}/{id}) isn’t deployed yet.'
+          : (e.message || 'Failed to save changes.'));
+      } finally { setEditSaving(false); }
+    };
 
     return (
       <div>
@@ -1781,6 +1858,54 @@ function AdminDashboardScreen({ onBack }) {
               <KV key={j} k={p.name_telugu || p.name} v={p.price_display || ('Rs.'+p.price)} />
             ))}
             <div style={{padding:'4px 0'}}/>
+          </div>
+        )}
+
+        {/* ── Edit content (all editable catalogs) ── */}
+        {canEdit && (
+          <div style={{marginTop:4}}>
+            {!editing ? (
+              <button onClick={startEdit}
+                style={{width:'100%',fontSize:13,fontWeight:800,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'12px',cursor:'pointer',marginBottom:8}}>
+                ✏️ Edit content
+              </button>
+            ) : (
+              <div style={{...cardS}}>
+                <SecH>Edit content{editLoading ? ' · loading…' : ''}</SecH>
+                {editErr && <div style={{fontSize:11,color:'#EF4444',marginBottom:8,lineHeight:1.4}}>{editErr}</div>}
+                {!editLoading && rawRec && editableEntries(rawRec).map(([k]) => {
+                  const long = /desc|message|detail|about|text|address|note|content|story|bio/i.test(k);
+                  return (
+                    <div key={k} style={{marginBottom:8}}>
+                      <div style={{fontSize:10,fontWeight:700,color:T.textMuted,marginBottom:3,textTransform:'capitalize'}}>
+                        {k.replace(/_/g,' ')}
+                      </div>
+                      {long ? (
+                        <textarea value={editVals[k] ?? ''} onChange={e=>setEditVals(v=>({...v,[k]:e.target.value}))}
+                          rows={3}
+                          style={{width:'100%',boxSizing:'border-box',resize:'vertical',fontSize:13,color:T.text,background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,padding:'8px 10px',fontFamily:'inherit'}}/>
+                      ) : (
+                        <input value={editVals[k] ?? ''} onChange={e=>setEditVals(v=>({...v,[k]:e.target.value}))}
+                          style={{width:'100%',boxSizing:'border-box',fontSize:13,color:T.text,background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,padding:'8px 10px',fontFamily:'inherit'}}/>
+                      )}
+                    </div>
+                  );
+                })}
+                {!editLoading && rawRec && editableEntries(rawRec).length === 0 && (
+                  <div style={{fontSize:12,color:T.textMuted,marginBottom:8}}>No editable text fields on this record.</div>
+                )}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:6}}>
+                  <button onClick={saveEdit} disabled={editSaving||editLoading}
+                    style={{fontSize:13,fontWeight:800,color:'#fff',background:'linear-gradient(135deg,#3B82F6,#1D4ED8)',border:'none',borderRadius:10,padding:'12px',cursor:(editSaving||editLoading)?'default':'pointer',opacity:(editSaving||editLoading)?0.6:1}}>
+                    {editSaving ? 'Saving…' : '💾 Save changes'}
+                  </button>
+                  <button onClick={()=>{ setEditing(false); setEditErr(''); }} disabled={editSaving}
+                    style={{fontSize:13,fontWeight:800,color:T.textMuted,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,padding:'12px',cursor:editSaving?'default':'pointer'}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -4,6 +4,13 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 import KurnoolShortsScreen from './../../screens/KurnoolShortsScreen.jsx';
 import SectionAccentBar from './../SectionAccentBar.jsx';
 
+// Some upload keys are stored by a backend bug as Windows local paths
+// (e.g. "C:\Users\…\file.jpg", percent-encoded). Those never exist in S3 →
+// 403/404 → black thumbnail. Drop them before they reach <video>/<img>.
+function isBrokenKey(u) {
+  return typeof u !== 'string' || u.includes('\\') || u.includes('%5C') || u.includes('%3A%5C');
+}
+
 // ── SHORT NEWS SECTION COMPONENT (with auto-scroll) ─────────
 // `items` (optional) — live incident-derived shorts from /api/incidents,
 // mapped by the parent (HomeScreen) into the SHORT_NEWS shape. When null /
@@ -81,26 +88,36 @@ function ShortNewsSection({ channel, items: liveItems }) {
                 generated bulletin URL (s.previewVideo); falls back to the
                 uploader-provided photo. */}
             <div style={{ width:108, height:192, borderRadius:10, overflow:'hidden',
-              background:'#111', position:'relative' }}>
-              {s.previewVideo ? (
-                <video
-                  src={s.previewVideo}
-                  poster={s.img}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  preload="metadata"
-                  style={{ width:'100%', height:'100%', objectFit:'cover', background:'#000' }}
-                />
-              ) : (
-                <img
-                  src={s.img}
-                  alt={s.titleEn}
-                  style={{ width:'100%', height:'100%', objectFit:'cover' }}
-                  onError={e => { e.target.style.opacity = '0.25'; }}
-                />
-              )}
+              background:'linear-gradient(135deg,#1a1a2e,#16213e)', position:'relative' }}>
+              {(() => {
+                // Filter out malformed S3 keys (Windows-path uploads) so a broken
+                // URL can't render as a black box. Prefer a real photo poster.
+                const vid = s.previewVideo && !isBrokenKey(s.previewVideo) ? s.previewVideo : null;
+                const poster = s.img && !isBrokenKey(s.img) ? safeImageUrl(s.img) : null;
+                return vid ? (
+                  <video
+                    // "#t=0.1" forces the browser to seek to the first frame and
+                    // paint it immediately, so the card shows real content instead
+                    // of a blank/black frame while autoplay spins up.
+                    src={vid + '#t=0.1'}
+                    poster={poster || undefined}
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    style={{ width:'100%', height:'100%', objectFit:'cover', background:'#000' }}
+                    onError={e => { e.target.style.display = 'none'; }}
+                  />
+                ) : (
+                  <img
+                    src={poster || s.img}
+                    alt={s.titleEn}
+                    style={{ width:'100%', height:'100%', objectFit:'cover' }}
+                    onError={e => { e.target.style.opacity = '0.25'; }}
+                  />
+                );
+              })()}
               {/* Tiny LIVE indicator — pulsing red dot only, no text */}
               {s.live && (
                 <div style={{ position:'absolute', top:7, left:7,

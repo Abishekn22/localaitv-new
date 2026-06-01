@@ -109,8 +109,19 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     : allLive;
   // Only verified, location-matched API content: live classifieds + verified
   // Public Voice cards + verified Talent Show cards (each list is already
-  // verified + location-scoped above).
-  const all = [...liveItems, ...pvCards, ...talentCards];
+  // verified + location-scoped above). Dedupe by `id` (falling back to a
+  // type+title+location composite for the rare item that ships without one)
+  // so the rail never renders the same post twice when the API returns it
+  // from more than one source or repeats it across pages.
+  const _seenKeys = new Set();
+  const all = [...liveItems, ...pvCards, ...talentCards].filter(it => {
+    const k = it && it.id != null
+      ? `id:${it.id}`
+      : `c:${it && it.type}|${it && (it.title || it.name)}|${it && it.location}`;
+    if (_seenKeys.has(k)) return false;
+    _seenKeys.add(k);
+    return true;
+  });
 
   // Randomly shuffle for display on home page — memoised so it doesn't re-shuffle on every re-render
   const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);
@@ -266,10 +277,11 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
               </div>
             </div>
           ))}
-          {/* Duplicate the list only when there are enough cards to actually
-              scroll — keeps the seamless auto-scroll loop for long lists while
-              avoiding a visible repeat for short ones. */}
-          {!showSkeleton && (filtered.length > 7 ? [...filtered, ...filtered] : filtered).map((cl,i)=>{
+          {/* Always render the list TWICE so the strip can loop forever — the
+              auto-scroll resets scrollLeft by exactly half (scrollWidth/2), so a
+              doubled list gives a seamless, never-ending scroll no matter how
+              few items there are (even 1 card keeps drifting continuously). */}
+          {!showSkeleton && filtered.length > 0 && [...filtered, ...filtered].map((cl,i)=>{
             // Use the REAL generated bulletin video as the thumbnail. Drop
             // malformed S3 keys (Windows-path uploads) so a broken URL can't
             // leave a black box — fall back to a real photo, then the category
