@@ -9,11 +9,14 @@ import SnapShortsScroller from './../components/Feed/SnapShortsScroller.jsx';
 function ClassifiedsFeedScreen({ onClose, startItemId = null, startItem = null, startIdx = 0, startCat = 'All', constituency = 'Kurnool' }) {
   const { T }    = useAppTheme();
   const [activeCat,   setActiveCat]   = useState(startCat);
-  const [curIdx,      setCurIdx]      = useState(startIdx); // live looped index (for share/comment target)
+  const [curIdx,      setCurIdx]      = useState(0); // live index (for share/comment target)
   const [showShare,   setShowShare]   = useState(false);
   const [showComment, setShowComment] = useState(false);
-  // One-shot seek: only honour startItemId until the user manually navigates.
-  const seekedRef = useRef(false);
+  // The post the user tapped on the home rail. We pin it to index 0 of the
+  // feed so opening from any rail card ALWAYS lands on that exact post,
+  // regardless of how the API list orders/resolves. Cleared when the user
+  // changes category or scrolls past it.
+  const [primaryItem, setPrimaryItem] = useState(startItem);
 
   useEffect(() => { document.body.style.overflow='hidden'; return()=>{ document.body.style.overflow=''; }; }, []);
 
@@ -51,43 +54,35 @@ function ClassifiedsFeedScreen({ onClose, startItemId = null, startItem = null, 
     const source = live.length > 0
       ? [...live, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
       : CLASSIFIEDS;
-    let items = activeCat === 'All' ? source : source.filter(c => c.cat === activeCat);
-    // Fallback: if the live API hasn't returned (or fails) AND the static
-    // CLASSIFIEDS doesn't contain the tapped post for this category, fall
-    // back to the post the user actually tapped — it travelled in with the
-    // navigation, so we ALWAYS have at least it.
-    if (items.length === 0 && startItem) items = [startItem];
-    // Also: if the user landed on a category that's empty in the current
-    // source but the tapped item is from a different cat, just show the
-    // tapped item rather than the empty screen.
-    else if (startItem && !items.some(c => String(c.id) === String(startItem.id))) {
-      items = [startItem, ...items];
+    const catItems = activeCat === 'All' ? source : source.filter(c => c.cat === activeCat);
+    const sorted = [...catItems].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
+    // Pin the tapped post at index 0 so the scroller's initial position
+    // ALWAYS lands on it — regardless of API order, sort, or load timing.
+    // Strip duplicates of the same id elsewhere in the list.
+    if (primaryItem) {
+      const rest = sorted.filter(c => String(c.id) !== String(primaryItem.id));
+      // Use the live (api-fresh) record if we found one — that way the post
+      // shows the most recent media/title — falling back to the tapped data
+      // when the api version isn't available.
+      const liveMatch = sorted.find(c => String(c.id) === String(primaryItem.id));
+      return [liveMatch || primaryItem, ...rest];
     }
-    return [...items].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
-  }, [activeCat, liveClassifieds, liveTalent, startItem]);
+    return sorted;
+  }, [activeCat, liveClassifieds, liveTalent, primaryItem]);
 
   const total   = filtered.length;
   const safeIdx = total > 0 ? ((curIdx % total) + total) % total : 0;
   const cur     = filtered[safeIdx];
 
-  // Resolve the requested start item to an index against the LIVE filtered
-  // list. Runs once per startItemId — after the data loads and we land on
-  // the correct post, subsequent renders leave the scroller alone.
-  const resolvedStartIdx = useMemo(() => {
-    if (seekedRef.current) return curIdx;
-    if (!startItemId || total === 0) return startIdx;
-    const ix = filtered.findIndex(c => String(c.id) === String(startItemId));
-    if (ix >= 0) { seekedRef.current = true; return ix; }
-    return startIdx;
-  }, [startItemId, filtered, total, startIdx, curIdx]);
+  // Track the live index for the share/comment target. We deliberately do NOT
+  // clear the pin on scroll: clearing it would re-sort `filtered` WITHOUT
+  // remounting the scroller, so the slide the user just scrolled to would
+  // suddenly swap to a different post (the very "wrong post" glitch we're
+  // fixing). The pin stays for the session; it's only cleared on a category
+  // change, which remounts the scroller cleanly.
+  const handleIndexChange = (idx) => { setCurIdx(idx); };
 
-  // Sync curIdx once we resolve, so the share/comment target tracks the
-  // landed post even before the user scrolls.
-  useEffect(() => {
-    if (seekedRef.current && curIdx !== resolvedStartIdx) setCurIdx(resolvedStartIdx);
-  }, [resolvedStartIdx]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleCatChange = (cat) => { setActiveCat(cat); setCurIdx(0); seekedRef.current = true; };
+  const handleCatChange = (cat) => { setActiveCat(cat); setCurIdx(0); setPrimaryItem(null); };
 
   // Still loading? Show a quiet spinner instead of the "no posts" screen so
   // the user never lands on an empty state during a normal navigation.
@@ -132,11 +127,11 @@ function ClassifiedsFeedScreen({ onClose, startItemId = null, startItem = null, 
             screen tall, leaving the ClassifiedFeedItem's action bar visible. */}
       <div style={{flex:1,position:'relative',overflow:'hidden'}}>
         <SnapShortsScroller
-          key={`cls-${activeCat}-${resolvedStartIdx}`}
+          key={`cls-${activeCat}`}
           total={total}
-          initialIdx={resolvedStartIdx}
+          initialIdx={0}
           resetKey={activeCat}
-          onIndexChange={setCurIdx}
+          onIndexChange={handleIndexChange}
           renderItem={(itemIndex, isActive) => {
             const item = filtered[itemIndex];
             if (!item) return null;

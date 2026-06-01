@@ -248,6 +248,11 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
           ref={scrollRef}
           onTouchStart={() => setPaused(true)}
           onTouchEnd={() => setTimeout(() => setPaused(false), 3000)}
+          // Pause the auto-scroll while the mouse is over the strip so a click
+          // reliably opens the post under the cursor (otherwise the card slides
+          // out from under the pointer mid-click and the tap "skips").
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
           style={{display:'flex',gap:10,padding:'0 16px 14px',overflowX:'auto',scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
           {/* Loading skeletons — shimmer placeholders while the live feed
               hasn't returned yet, so the strip never looks empty/broken. */}
