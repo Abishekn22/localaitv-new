@@ -6,12 +6,14 @@ import ClassifiedShareSheet from './../components/Feed/ClassifiedShareSheet.jsx'
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 import SnapShortsScroller from './../components/Feed/SnapShortsScroller.jsx';
 
-function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', constituency = 'Kurnool' }) {
+function ClassifiedsFeedScreen({ onClose, startItemId = null, startItem = null, startIdx = 0, startCat = 'All', constituency = 'Kurnool' }) {
   const { T }    = useAppTheme();
   const [activeCat,   setActiveCat]   = useState(startCat);
   const [curIdx,      setCurIdx]      = useState(startIdx); // live looped index (for share/comment target)
   const [showShare,   setShowShare]   = useState(false);
   const [showComment, setShowComment] = useState(false);
+  // One-shot seek: only honour startItemId until the user manually navigates.
+  const seekedRef = useRef(false);
 
   useEffect(() => { document.body.style.overflow='hidden'; return()=>{ document.body.style.overflow=''; }; }, []);
 
@@ -23,21 +25,20 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
   }, [onClose]);
 
   // Live data from the backend (Who-is-Who today; more categories later).
-  const { data: liveClassifieds } = useAPI(
+  const { data: liveClassifieds, loading: clsLoading } = useAPI(
     () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=50`).then(d => d.items || d),
     [], [constituency]
   );
   // Talent Show has its own feed endpoint (not part of /classifieds). Pull it
   // here so tapping a Talent card on the home strip lands on the REAL verified
   // video instead of the static mock.
-  const { data: liveTalent } = useAPI(
+  const { data: liveTalent, loading: talentLoading } = useAPI(
     () => apiCall('/feed/talent').then(d => d.items || d),
     [], []
   );
+  const apiLoading = clsLoading || talentLoading;
 
   const filtered = useMemo(() => {
-    // Live data only — no bundled mock fallback. The empty-state below renders
-    // when the API returns nothing.
     const liveItems = Array.isArray(liveClassifieds) ? liveClassifieds : [];
     // Only admin-approved (verified) talent videos, shaped like a classified.
     const talentItems = (Array.isArray(liveTalent) ? liveTalent : [])
@@ -50,16 +51,56 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
     const source = live.length > 0
       ? [...live, ...CLASSIFIEDS.filter(c => !liveCats.has(c.cat))]
       : CLASSIFIEDS;
-    const items = activeCat === 'All' ? source : source.filter(c => c.cat === activeCat);
+    let items = activeCat === 'All' ? source : source.filter(c => c.cat === activeCat);
+    // Fallback: if the live API hasn't returned (or fails) AND the static
+    // CLASSIFIEDS doesn't contain the tapped post for this category, fall
+    // back to the post the user actually tapped — it travelled in with the
+    // navigation, so we ALWAYS have at least it.
+    if (items.length === 0 && startItem) items = [startItem];
+    // Also: if the user landed on a category that's empty in the current
+    // source but the tapped item is from a different cat, just show the
+    // tapped item rather than the empty screen.
+    else if (startItem && !items.some(c => String(c.id) === String(startItem.id))) {
+      items = [startItem, ...items];
+    }
     return [...items].sort((a,b) => new Date(b.uploadedAt||0) - new Date(a.uploadedAt||0));
-  }, [activeCat, liveClassifieds, liveTalent]);
+  }, [activeCat, liveClassifieds, liveTalent, startItem]);
 
   const total   = filtered.length;
   const safeIdx = total > 0 ? ((curIdx % total) + total) % total : 0;
   const cur     = filtered[safeIdx];
 
-  const handleCatChange = (cat) => { setActiveCat(cat); setCurIdx(0); };
+  // Resolve the requested start item to an index against the LIVE filtered
+  // list. Runs once per startItemId — after the data loads and we land on
+  // the correct post, subsequent renders leave the scroller alone.
+  const resolvedStartIdx = useMemo(() => {
+    if (seekedRef.current) return curIdx;
+    if (!startItemId || total === 0) return startIdx;
+    const ix = filtered.findIndex(c => String(c.id) === String(startItemId));
+    if (ix >= 0) { seekedRef.current = true; return ix; }
+    return startIdx;
+  }, [startItemId, filtered, total, startIdx, curIdx]);
 
+  // Sync curIdx once we resolve, so the share/comment target tracks the
+  // landed post even before the user scrolls.
+  useEffect(() => {
+    if (seekedRef.current && curIdx !== resolvedStartIdx) setCurIdx(resolvedStartIdx);
+  }, [resolvedStartIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCatChange = (cat) => { setActiveCat(cat); setCurIdx(0); seekedRef.current = true; };
+
+  // Still loading? Show a quiet spinner instead of the "no posts" screen so
+  // the user never lands on an empty state during a normal navigation.
+  if (total === 0 && apiLoading) return (
+    <div style={{position:'fixed',inset:0,zIndex:300,background:T.bg,
+      display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14}}>
+      <div style={{width:36,height:36,border:`3px solid ${T.border}`,borderTopColor:T.red,borderRadius:'50%',
+        animation:'classifiedsFeedSpin 0.9s linear infinite'}}/>
+      <style>{`@keyframes classifiedsFeedSpin { to { transform: rotate(360deg); } }`}</style>
+      <button onClick={onClose} style={{marginTop:6,padding:'8px 20px',borderRadius:12,
+        background:'transparent',border:`1px solid ${T.border}`,color:T.textMuted,fontSize:13,cursor:'pointer'}}>← వెనక్కి</button>
+    </div>
+  );
   if(!cur && total===0) return (
     <div style={{position:'fixed',inset:0,zIndex:300,background:T.bg,
       display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:12}}>
@@ -91,8 +132,9 @@ function ClassifiedsFeedScreen({ onClose, startIdx = 0, startCat = 'All', consti
             screen tall, leaving the ClassifiedFeedItem's action bar visible. */}
       <div style={{flex:1,position:'relative',overflow:'hidden'}}>
         <SnapShortsScroller
+          key={`cls-${activeCat}-${resolvedStartIdx}`}
           total={total}
-          initialIdx={startIdx}
+          initialIdx={resolvedStartIdx}
           resetKey={activeCat}
           onIndexChange={setCurIdx}
           renderItem={(itemIndex, isActive) => {

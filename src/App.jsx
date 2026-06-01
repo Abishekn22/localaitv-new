@@ -451,6 +451,7 @@ function App() {
         // one-shot window flags before navigating.
         let preset      = classifiedsCat;
         let startItemId = null;
+        let startItem   = null;
         if (typeof window !== 'undefined') {
           if (window.__classifiedsStartCat) {
             preset = window.__classifiedsStartCat;
@@ -460,23 +461,18 @@ function App() {
             startItemId = window.__classifiedsStartItemId;
             window.__classifiedsStartItemId = null;
           }
+          if (window.__classifiedsStartItem) {
+            startItem = window.__classifiedsStartItem;
+            window.__classifiedsStartItem = null;
+          }
         }
-        // Compute startIdx by replicating ClassifiedsFeedScreen's own
-        // filter + sort (newest-first by uploadedAt) so the screen
-        // opens at the exact tapped item.
-        let startIdx = 0;
-        if (startItemId) {
-          const catName = preset || 'All';
-          const pool = catName === 'All'
-            ? CLASSIFIEDS
-            : CLASSIFIEDS.filter(c => c.cat === catName);
-          const sorted = [...pool].sort((a,b) =>
-            new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0)
-          );
-          const ix = sorted.findIndex(c => c.id === startItemId);
-          if (ix >= 0) startIdx = ix;
-        }
-        return <ClassifiedsFeedScreen onClose={()=>navigate('home')} startIdx={startIdx} startCat={preset || 'All'}/>;
+        // Hand the raw id (not a pre-computed index) to the feed screen.
+        // It must compute the index against its OWN live list — the static
+        // CLASSIFIEDS array doesn't match the API result and using an index
+        // derived from it lands on the wrong post. We also pass the full
+        // tapped item as a hard fallback so the user always sees that post
+        // even if the feed's API call is still in flight or fails.
+        return <ClassifiedsFeedScreen onClose={()=>navigate('home')} startItemId={startItemId} startItem={startItem} startCat={preset || 'All'}/>;
       }
       case 'bulletinsfeed': {
         // When opened from a channel detail page, filter to that channel's

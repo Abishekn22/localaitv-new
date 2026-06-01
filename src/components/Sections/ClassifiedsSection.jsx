@@ -15,7 +15,7 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   const scrollRef = useRef(null);
   const [paused, setPaused] = useState(false);
 
-  const { data: liveClassifieds } = useAPI(
+  const { data: liveClassifieds, loading: clsLoading } = useAPI(
     () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=30`).then(d => d.items || d),
     [], [constituency]
   );
@@ -150,12 +150,29 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     if (typeof window !== 'undefined') {
       window.__classifiedsStartCat    = cat;
       window.__classifiedsStartItemId = item && item.id;
+      // Also stash the full item so the feed can render it even when its own
+      // API call hasn't resolved yet (or fails — e.g. CORS on a new origin).
+      // Without this, tapping any card may land on the empty-state screen.
+      window.__classifiedsStartItem   = item || null;
     }
     onNavigate && onNavigate('classifiedsfeed');
   }
 
+  // Shimmer skeleton styling — shared by the home strip placeholders and the
+  // per-thumbnail loading sheen. The keyframes are injected once below.
+  const shimmerStyle = {
+    background: T.bg3,
+    backgroundImage: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent)',
+    backgroundSize: '200% 100%',
+    animation: 'clShimmer 1.3s linear infinite',
+  };
+  // While the live API hasn't resolved AND we have nothing to show yet, render
+  // skeleton cards instead of an empty strip.
+  const showSkeleton = clsLoading && filtered.length === 0;
+
   return (
     <>
+      <style>{`@keyframes clShimmer{0%{background-position:-150% 0}100%{background-position:150% 0}}`}</style>
       <div style={{background:T.bg}}>
         {/* ── Header — OTT premium typography hierarchy with red accent bar ── */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'18px 16px 10px',gap:10}}>
@@ -232,10 +249,22 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
           onTouchStart={() => setPaused(true)}
           onTouchEnd={() => setTimeout(() => setPaused(false), 3000)}
           style={{display:'flex',gap:10,padding:'0 16px 14px',overflowX:'auto',scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
+          {/* Loading skeletons — shimmer placeholders while the live feed
+              hasn't returned yet, so the strip never looks empty/broken. */}
+          {showSkeleton && Array.from({length:5}).map((_,i)=>(
+            <div key={'sk'+i} style={{flexShrink:0,width:155,borderRadius:14,overflow:'hidden',
+              border:`1px solid ${T.border}`,background:T.bg2}}>
+              <div style={{width:'100%',height:100,...shimmerStyle}}/>
+              <div style={{padding:'8px 10px 10px'}}>
+                <div style={{height:10,borderRadius:4,marginBottom:6,...shimmerStyle}}/>
+                <div style={{height:10,width:'62%',borderRadius:4,...shimmerStyle}}/>
+              </div>
+            </div>
+          ))}
           {/* Duplicate the list only when there are enough cards to actually
               scroll — keeps the seamless auto-scroll loop for long lists while
               avoiding a visible repeat for short ones. */}
-          {(filtered.length > 7 ? [...filtered, ...filtered] : filtered).map((cl,i)=>{
+          {!showSkeleton && (filtered.length > 7 ? [...filtered, ...filtered] : filtered).map((cl,i)=>{
             // Use the REAL generated bulletin video as the thumbnail. Drop
             // malformed S3 keys (Windows-path uploads) so a broken URL can't
             // leave a black box — fall back to a real photo, then the category
@@ -257,7 +286,7 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
                   moving preview; only items with no usable video fall back to a
                   photo. */}
               <div style={{width:'100%',height:100,position:'relative',overflow:'hidden',
-                background:T.bg3}}>
+                ...shimmerStyle}}>
                 {vid ? (
                   <video
                     src={vid + '#t=0.1'}

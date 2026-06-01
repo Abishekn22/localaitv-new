@@ -12,9 +12,29 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
   const { T } = useAppTheme();
   const [slide, setSlide]   = useState(0);
   const [fading, setFading]  = useState(false);
+  // Skeleton shimmer while the media (video/image) is still loading, so the
+  // detail page shows a loading animation instead of a black/blank frame.
+  const [mediaLoaded, setMediaLoaded] = useState(false);
   const safeImages = Array.isArray(images) ? images.filter(u => !isBrokenKey(u)) : [];
   const safeVideos = Array.isArray(videos) ? videos.filter(u => !isBrokenKey(u)) : [];
   const total = safeImages.length;
+
+  // Reset the loading shimmer whenever the media source changes.
+  useEffect(() => { setMediaLoaded(false); }, [images, videos, ytId, slide]);
+
+  // Full-bleed shimmer overlay shown until the media reports loaded.
+  const Shimmer = () => (
+    <>
+      <style>{`@keyframes clShimmer{0%{background-position:-150% 0}100%{background-position:150% 0}}`}</style>
+      <div style={{
+        position:'absolute', inset:0, zIndex:1,
+        background:'#15151f',
+        backgroundImage:'linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent)',
+        backgroundSize:'200% 100%',
+        animation:'clShimmer 1.3s linear infinite',
+      }}/>
+    </>
+  );
 
   // Auto-advance slides every 2.8s when active
   useEffect(() => {
@@ -54,6 +74,7 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
   if (cat !== 'Who is Who' && safeVideos.length > 0) {
     return (
       <div style={{ width:'100%', height:'100%', position:'relative', background:'#000' }}>
+        {!mediaLoaded && <Shimmer/>}
         <video
           src={safeVideos[0]}
           poster={safeImages[0] || undefined}
@@ -63,7 +84,8 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
           playsInline
           controls
           preload="auto"
-          style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', background:'#000' }}
+          style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', background:'#000', position:'relative', zIndex:2 }}
+          onLoadedData={() => setMediaLoaded(true)}
           onError={e => { e.target.style.display='none'; }}
         />
       </div>
@@ -90,16 +112,20 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
       <div style={{ width:'100%', height:'100%', position:'relative', overflow:'hidden',
         background: catGrad[cat] || 'linear-gradient(135deg,#1a1a2e,#16213e)' }}>
 
+        {/* Loading shimmer until the current image paints */}
+        {!mediaLoaded && <Shimmer/>}
+
         {/* Current image */}
         <img
           src={safeImages[slide]}
           alt=""
           style={{
-            position:'absolute', inset:0,
+            position:'absolute', inset:0, zIndex:2,
             width:'100%', height:'100%', objectFit:'cover',
             opacity: fading ? 0 : 1,
             transition: 'opacity 0.35s ease-in-out',
           }}
+          onLoad={() => setMediaLoaded(true)}
           onError={e => e.target.style.opacity='0'}
         />
 
