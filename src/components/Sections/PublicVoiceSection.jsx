@@ -8,11 +8,7 @@ import { publicVoiceToShortShape } from './ShortNewsSection.jsx';
 
 function PublicVoiceSection({ onNavigate, channel, locationId }) {
   const { T } = useAppTheme();
-  const scrollerRef    = useRef(null);
-  const touchingRef    = useRef(false);
-  const lastTouchEndAt = useRef(0);
-  const lastTickAt     = useRef(0);
-  const initialisedRef = useRef(false);
+  const scrollerRef = useRef(null);
 
   // Fetch the set, then on the client keep only admin-verified items scoped to
   // the selected location (see `items` below). The section shows ONLY approved
@@ -55,20 +51,10 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
     return true;
   });
 
-  const CARD_W = 116;                  // 108 + marginRight:8
-  const baseW = items.length * CARD_W; // width of one pass over the real items
-  // The buffer-zone wrap below fires at 2× the cycle width, but the browser
-  // caps scrollLeft at (3×cycle − viewport). When there are only a few items
-  // one cycle is narrower than the screen, so that cap sits BELOW the wrap point
-  // → scrollLeft can never reach it, the wrap never happens, and the rail stops
-  // dead at the end. Repeat the items enough that one cycle copy is always wider
-  // than the viewport, so the wrap is always reachable and the loop never stops.
-  const viewportW = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 480;
-  const reps = items.length ? Math.max(1, Math.ceil((viewportW + CARD_W) / baseW)) : 1;
-  const unit = [];
-  for (let r = 0; r < reps; r++) unit.push(...items);
-  const cycleW = unit.length * CARD_W; // == reps × baseW, guaranteed > viewport
-  const looped = items.length ? [...unit, ...unit, ...unit] : [];   // 3 copies
+  // Static carousel — no auto-scroll, so we render each item exactly once
+  // instead of triplicating for seamless wraparound. Manual swipe / scroll
+  // gestures handled natively by overflowX:'auto' below.
+  const looped = items;
 
   function openCard(item) {
     // Hand the LIVE (already location-filtered) items to the fullscreen viewer,
@@ -82,47 +68,9 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
     onNavigate && onNavigate('publicvoicefeed');
   }
 
-  useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    // Park scroll position in the middle copy on first mount so the user
-    // can freely swipe left and right by a whole copy before we wrap.
-    if (!initialisedRef.current) {
-      el.scrollLeft = cycleW;
-      initialisedRef.current = true;
-    }
-
-    let raf;
-    const SPEED = 28; // px / sec — calm reels-like pace
-    const tick = (t) => {
-      if (!el) { raf = requestAnimationFrame(tick); return; }
-      if (lastTickAt.current === 0) lastTickAt.current = t;
-      const dt = Math.min(0.1, (t - lastTickAt.current) / 1000);
-      lastTickAt.current = t;
-
-      // Auto-nudge only when the user is fully idle (touch released for >1s
-      // so native momentum has finished). Otherwise let native scroll run.
-      const idleMs = performance.now() - lastTouchEndAt.current;
-      if (!touchingRef.current && idleMs > 1000) {
-        el.scrollLeft += SPEED * dt;
-      }
-
-      // Buffer-zone wrap: when scrollLeft drifts past the middle copy in
-      // either direction, snap by exactly cycleW. Visually identical pixels
-      // (because the copies are duplicates), so the snap is invisible — and
-      // it never happens near where the user's finger is right now.
-      if (el.scrollLeft >= 2 * cycleW)      el.scrollLeft -= cycleW;
-      else if (el.scrollLeft < cycleW * 0.5) el.scrollLeft += cycleW;
-
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [cycleW]);
-
-  // Touch / mouse — purely for tracking idle state; native scroll handles motion.
-  const onTouchStart = () => { touchingRef.current = true; };
-  const onTouchEnd   = () => { touchingRef.current = false; lastTouchEndAt.current = performance.now(); };
+  // Auto-scroll removed per UX request — strip is now a static horizontal
+  // carousel. Native browser scrolling (overflowX:'auto') handles manual
+  // swipe (mobile) and mouse-wheel / drag (desktop).
 
   // While the first fetch is still in flight, show a shimmer skeleton rail so
   // the section reserves its space and signals loading rather than popping in
@@ -158,12 +106,6 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
       {/* Native horizontal scroller. Auto-nudge + manual swipe coexist. */}
       <div
         ref={scrollerRef}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
-        onMouseDown={onTouchStart}
-        onMouseUp={onTouchEnd}
-        onMouseLeave={onTouchEnd}
         style={{
           display:'flex',
           padding:'0 16px 14px',
