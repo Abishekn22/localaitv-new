@@ -13,7 +13,6 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   const [selected, setSelected] = useState(null);
   const [selIdx,   setSelIdx]   = useState(0);
   const scrollRef = useRef(null);
-  const [paused, setPaused] = useState(false);
 
   const { data: liveClassifieds, loading: clsLoading } = useAPI(
     () => apiCall(`/classifieds?constituency=${encodeURIComponent(constituency)}&limit=30`).then(d => d.items || d),
@@ -127,22 +126,10 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);
   const filtered = cat === 'All' ? shuffled : all.filter(c => c.cat === cat);
 
-  // Auto-scroll the strip continuously. The list is rendered ONCE (each post
-  // appears a single time — no duplicates). When the scroll reaches the end we
-  // wrap back to the start so the motion never stops; if everything already
-  // fits on screen there's simply nothing to scroll.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const iv = setInterval(() => {
-      if (!el || paused) return;
-      const max = el.scrollWidth - el.clientWidth;
-      if (max <= 0) return;            // content fits — nothing to scroll
-      if (el.scrollLeft >= max - 1) el.scrollLeft = 0; // reached the end → loop
-      else el.scrollLeft += 1;
-    }, 30);
-    return () => clearInterval(iv);
-  }, [paused, cat, filtered.length]);
+  // Auto-scroll removed per UX request — the strip is now a static
+  // horizontal carousel. Native browser scrolling (overflowX:'auto' below)
+  // gives users manual swipe (mobile) + scroll (desktop) when they want to
+  // browse, with no automatic movement on page load.
 
   // Open the tapped classified in the App-level classifieds detail page
   // (not an inline overlay). Per Mohan's request: clicking any Kurnool
@@ -256,16 +243,9 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
           ))}
         </div>
 
-        {/* ── Cards — continuous auto-scroll loop (doubled list) ── */}
+        {/* ── Cards — static horizontal carousel (manual scroll only) ── */}
         <div
           ref={scrollRef}
-          onTouchStart={() => setPaused(true)}
-          onTouchEnd={() => setTimeout(() => setPaused(false), 3000)}
-          // Pause the auto-scroll while the mouse is over the strip so a click
-          // reliably opens the post under the cursor (otherwise the card slides
-          // out from under the pointer mid-click and the tap "skips").
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
           style={{display:'flex',gap:10,padding:'0 16px 14px',overflowX:'auto',scrollbarWidth:'none',WebkitOverflowScrolling:'touch'}}>
           {/* Loading skeletons — shimmer placeholders while the live feed
               hasn't returned yet, so the strip never looks empty/broken. */}

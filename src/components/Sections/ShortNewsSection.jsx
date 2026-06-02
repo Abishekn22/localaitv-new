@@ -11,33 +11,24 @@ function isBrokenKey(u) {
   return typeof u !== 'string' || u.includes('\\') || u.includes('%5C') || u.includes('%3A%5C');
 }
 
-// ── SHORT NEWS SECTION COMPONENT (with auto-scroll) ─────────
+// ── SHORT NEWS SECTION COMPONENT (manual scroll only) ────────
 // `items` (optional) — live incident-derived shorts from /api/incidents,
 // mapped by the parent (HomeScreen) into the SHORT_NEWS shape. When null /
 // empty the section falls back to the bundled SHORT_NEWS demo set.
+//
+// Auto-scroll was removed per UX request — the strip is now a static
+// horizontal carousel. Users swipe (mobile) or scroll (desktop) manually.
 function ShortNewsSection({ channel, items: liveItems }) {
   const { T } = useAppTheme();
   const [openIdx,    setOpenIdx]    = useState(null);
   const [openItem,   setOpenItem]   = useState(null); // the exact clip tapped (resolved by identity in the viewer)
   const [showFeed,   setShowFeed]   = useState(false);
   const scrollRef  = useRef(null);
-  const [paused, setPaused] = useState(false);
-
-  // Auto-scroll strip
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const iv = setInterval(() => {
-      if (!el || paused) return;
-      const half = el.scrollWidth / 2;
-      if (el.scrollLeft >= half) el.scrollLeft -= half;
-      else el.scrollLeft += 1;
-    }, 30);
-    return () => clearInterval(iv);
-  }, [paused]);
 
   const source = (Array.isArray(liveItems) && liveItems.length > 0) ? liveItems : SHORT_NEWS;
-  const items  = [...source, ...source];
+  // No duplication — the strip no longer auto-scrolls so we don't need a
+  // second copy of the list for seamless wraparound.
+  const items  = source;
   const total  = source.length;
 
   return (
@@ -64,11 +55,10 @@ function ShortNewsSection({ channel, items: liveItems }) {
           style={{ fontSize:11, color:T.red, fontWeight:600, cursor:'pointer', flexShrink:0 }}>See all →</span>
       </div>
 
-      {/* Cards — YouTube Shorts aspect ratio 9:16 ≈ width:108 height:192 */}
+      {/* Cards — YouTube Shorts aspect ratio 9:16 ≈ width:108 height:192.
+          Static carousel — manual swipe (mobile) or scroll (desktop) only. */}
       <div
         ref={scrollRef}
-        onTouchStart={() => setPaused(true)}
-        onTouchEnd={() => setTimeout(() => setPaused(false), 3000)}
         style={{ display:'flex', gap:8, padding:'0 16px 14px',
           overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}
       >
