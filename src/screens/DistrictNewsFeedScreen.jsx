@@ -5,6 +5,7 @@ import BulletinPlayerScreen from './BulletinPlayerScreen.jsx';
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 import Logo from './../components/Logo.jsx';
 import NewsShareSheet from './../components/Feed/NewsShareSheet.jsx';
+import { isAudioUnlocked } from './../utils/audioUnlock.js';
 
 function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0, items, disableCategoryFilter = false }) {
   const { T } = useAppTheme();
@@ -212,8 +213,9 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0, items
               {active.ytId ? (
                 <iframe
                   key={active.id}
+                  data-yt-audio="1"
                   style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%', border:'none' }}
-                  src={`https://www.youtube.com/embed/${active.ytId}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
+                  src={`https://www.youtube.com/embed/${active.ytId}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                   title={active.titleEn || active.title}
@@ -224,10 +226,12 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0, items
                 // inside the 16:9 frame instead of being cropped.
                 <video
                   key={active.id}
+                  data-primary-audio="1"
                   src={active.mediaUrl}
                   poster={active.thumbnail || undefined}
                   controls
                   autoPlay
+                  muted={!isAudioUnlocked()}
                   playsInline
                   style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%', objectFit:'contain', background:'#000' }}
                 />

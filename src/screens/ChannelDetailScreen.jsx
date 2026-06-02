@@ -3,6 +3,7 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import { LiveDot } from './../components/atoms.jsx';
 import { mapBulletin, filterBulletinsByLocation } from '../_imports.js';
+import { isAudioUnlocked } from './../utils/audioUnlock.js';
 
 function ChannelDetailScreen({ channel, onBack, onOpenNews, onOpenBulletin }) {
   // Filter tabs reuse BULLETIN_SEGS: [LOCAL, DISTRICT, STATE, NATIONAL, ADS].
@@ -39,7 +40,8 @@ function ChannelDetailScreen({ channel, onBack, onOpenNews, onOpenBulletin }) {
         <div style={{width:'100%',height:210,background:'#000',position:'relative'}}>
           <iframe
             key={channel.id}
-            src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[channel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1`}
+            data-yt-audio="1"
+            src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[channel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
             style={{width:'100%',height:'100%',border:'none',display:'block'}}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen

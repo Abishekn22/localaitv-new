@@ -2,6 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppRoot from './App.jsx';
 import './index.css';
+import { initAudioUnlock } from './utils/audioUnlock.js';
+
+// Unmute all primary video/Live-TV players on the user's first interaction.
+// (Browsers block autoplay-with-sound until then — see utils/audioUnlock.js.)
+initAudioUnlock();
 
 // Global image safety net — if any <img> fails to load (dead CDN link, 404,
 // network error), swap it once to a same-origin placeholder. A local asset can

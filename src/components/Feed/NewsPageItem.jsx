@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, APP_VERSION, apiCall, API, useAPI, useReveal, Reveal, AP_CONSTITUENCIES, TG_CONSTITUENCIES, NEWS_ITEMS, NEWS_CATS, REPORTERS, BULLETIN_SEGS, CLASSIFIEDS, CL_CATS, CL_CAT_EMOJI, CL_CAT_IMG, CL_BADGE_COLOR, NO_CALL_CATS, CL_SUBCATS, CONTACT_CATS, CHANNELS_AP, CHANNELS_TG, TICKER_TEXT, getChannelName, YT_CHANNEL_ID, YT_LIVE_KURNOOL, YT_LIVE_GUNTUR, YT_LIVE_NELLORE, YT_LIVE_KAKINADA, YT_LIVE_TIRUPATI, YT_LIVE_KHAMMAM, YT_LIVE_KARIMNAGAR, YT_LIVE_WARANGAL, YT_LIVE_NALGONDA, YT_LIVE_VIDEO, YT_LIVE_KNR, YT_LIVE_GTV, YT_LIVE_FALLBACK, CHANNEL_VIDEO, LIVE_CHANNELS, BULLETINS, PROGRAM_TYPES, PROGRAM_COLORS, SHORT_NEWS, CONSTITUENCY_DISTRICT, WISH_TYPES, CONTENT_TYPES, TE_LABEL_MAP, VEG_LIST, VEG_LIST_TE, AP_DISTRICTS, TG_DISTRICTS, css } from '../../_imports.js';
 
 import SharedActionBar from './../SharedActionBar.jsx';
+import { isAudioUnlocked } from './../../utils/audioUnlock.js';
 
 function NewsPageItem({ item, isActive, onShare, onComment }) {
   const { T } = useAppTheme();
@@ -90,7 +91,8 @@ function NewsPageItem({ item, isActive, onShare, onComment }) {
         {isActive && item.ytId ? (
           <iframe
             key={`nv-${item.id}`}
-            src={`https://www.youtube.com/embed/${item.ytId}?autoplay=1&mute=0&rel=0&modestbranding=1&controls=1`}
+            data-yt-audio="1"
+            src={`https://www.youtube.com/embed/${item.ytId}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&rel=0&modestbranding=1&controls=1&enablejsapi=1`}
             title={item.titleEn || item.title}
             allow="autoplay; encrypted-media; fullscreen"
             allowFullScreen
