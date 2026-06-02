@@ -3,6 +3,7 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import CommentDrawer from './../components/sheets/CommentDrawer.jsx';
 import Logo from './../components/Logo.jsx';
+import { isAudioUnlocked } from './../utils/audioUnlock.js';
 
 function BulletinPlayerScreen({ startIdx = 0, onClose, location = null }) {
   const { T } = useAppTheme();
@@ -154,8 +155,9 @@ function BulletinPlayerScreen({ startIdx = 0, onClose, location = null }) {
               {active.ytId ? (
                 <iframe
                   key={active.id}
+                  data-yt-audio="1"
                   style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', border:'none'}}
-                  src={`https://www.youtube.com/embed/${active.ytId}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
+                  src={`https://www.youtube.com/embed/${active.ytId}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                   title={active.titleEn || active.titleTe}
@@ -163,10 +165,12 @@ function BulletinPlayerScreen({ startIdx = 0, onClose, location = null }) {
               ) : active.videoUrl ? (
                 <video
                   key={active.id}
+                  data-primary-audio="1"
                   src={active.videoUrl}
                   poster={active.thumbnail || undefined}
                   controls
                   autoPlay
+                  muted={!isAudioUnlocked()}
                   playsInline
                   style={{position:'absolute', top:0, left:0, width:'100%', height:'100%', background:'#000', objectFit:'contain'}}
                 />

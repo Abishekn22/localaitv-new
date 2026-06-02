@@ -19,6 +19,7 @@ import { LocationPin, LiveDot, FooterLink, SkeletonBox } from './../components/a
 import { ShortNewsSection } from './../components/Sections/ShortNewsSection.jsx';
 import { useAuth } from './../contexts/AuthContext.jsx';
 import { useNotifications, formatNotifTime } from './../contexts/NotificationContext.jsx';
+import { isAudioUnlocked } from './../utils/audioUnlock.js';
 
 function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstituency, userState, onChangeLocation, onSelectLocation }) {
   const { T, isDark, toggleTheme } = useAppTheme();
@@ -1181,10 +1182,13 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
         }}>
           {activeChannel?.live ? (
             <div style={{position:'relative',paddingBottom:'56.25%',height:0,background:'#000'}}>
-              {/* Muted autoplay (mute=1): browsers BLOCK unmuted autoplay without a
-                  prior user gesture, so on initial page open / location change the
-                  video would otherwise stay paused. Muted guarantees it always
-                  auto-plays; the viewer taps YouTube's unmute for sound.
+              {/* Autoplay starts MUTED (mute=1) because browsers BLOCK unmuted
+                  autoplay without a prior user gesture — muted guarantees the
+                  stream always plays on open. The global audio-unlock controller
+                  (utils/audioUnlock.js) then unmutes this embed automatically on
+                  the user's very first tap/scroll via the YouTube IFrame API
+                  (enablejsapi=1 + data-yt-audio). If the user has already
+                  interacted earlier in the session, we render it unmuted directly.
                   key={channel id} → the iframe fully remounts on channel switch, so
                   the new channel starts cleanly.
                   The iframe is REMOVED from the DOM whenever another video surface is
@@ -1194,8 +1198,9 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               {(!feedViewer && !selectedShort && !showLiveOverlay && topStoriesViewerIdx === null) && (
               <iframe
                 key={activeChannel.id}
+                data-yt-audio="1"
                 style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',border:'none'}}
-                src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[activeChannel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=1&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1`}
+                src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[activeChannel.id] || YT_LIVE_VIDEO}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
                 loading="eager"
@@ -1998,11 +2003,15 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
             pointerEvents:'none', backdropFilter:'blur(2px)' }}>
             <Logo size="xs" dark={true} showTV={true}/>
           </div>
-          {/* The live YouTube embed (same one as the top of the home page) */}
+          {/* The live YouTube embed (same one as the top of the home page).
+              The user reached this fullscreen overlay by tapping, so audio is
+              already unlocked — render unmuted directly; data-yt-audio keeps it
+              in sync with the global audio-unlock controller as a safety net. */}
           <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center'}}>
             <div style={{width:'100%', paddingBottom:'56.25%', height:0, position:'relative'}}>
               <iframe
-                src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[activeChannel?.id] || YT_LIVE_VIDEO}?autoplay=1&mute=0&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1`}
+                data-yt-audio="1"
+                src={`https://www.youtube.com/embed/${CHANNEL_VIDEO[activeChannel?.id] || YT_LIVE_VIDEO}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&modestbranding=1&rel=0&playsinline=1&controls=1&fs=1&enablejsapi=1`}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
                 title={`${activeChannel?.name || 'LocalAI'} TV Live`}

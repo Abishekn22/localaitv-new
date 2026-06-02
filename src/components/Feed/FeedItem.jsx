@@ -5,6 +5,7 @@ import CommentDrawer from './../sheets/CommentDrawer.jsx';
 import RatingDrawer from './../sheets/RatingDrawer.jsx';
 import SharedActionBar from './../SharedActionBar.jsx';
 import UnifiedFeedViewer from './UnifiedFeedViewer.jsx';
+import { isAudioUnlocked } from './../../utils/audioUnlock.js';
 
 function FeedItem({ item, isActive, onShare }) {
   const { T } = useAppTheme();
@@ -56,7 +57,8 @@ function FeedItem({ item, isActive, onShare }) {
           background:'#000', flexShrink:0, overflow:'hidden' }}>
         {item.ytId && isActive ? (
           <iframe
-            src={`https://www.youtube.com/embed/${item.ytId}?autoplay=1&mute=0&loop=1&playlist=${item.ytId}&controls=1&rel=0&modestbranding=1&cc_load_policy=0`}
+            data-yt-audio="1"
+            src={`https://www.youtube.com/embed/${item.ytId}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&loop=1&playlist=${item.ytId}&controls=1&rel=0&modestbranding=1&cc_load_policy=0&enablejsapi=1`}
             title={item.headline}
             allow="autoplay; encrypted-media; fullscreen"
             allowFullScreen

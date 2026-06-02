@@ -8,6 +8,8 @@ function isBrokenKey(u) {
   return typeof u !== 'string' || u.includes('\\') || u.includes('%5C') || u.includes('%3A%5C');
 }
 
+import { isAudioUnlocked } from './../../utils/audioUnlock.js';
+
 function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
   const { T } = useAppTheme();
   const [slide, setSlide]   = useState(0);
@@ -78,8 +80,9 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
         <video
           src={safeVideos[0]}
           poster={safeImages[0] || undefined}
+          data-primary-audio={isActive ? '1' : undefined}
           autoPlay={isActive}
-          muted
+          muted={!(isActive && isAudioUnlocked())}
           loop
           playsInline
           controls
@@ -97,7 +100,8 @@ function ImageSlideshowPlayer({ images, videos, ytId, isActive, cat }) {
     return (
       <div style={{ width:'100%', height:'100%', position:'relative', background:'#000' }}>
         <iframe
-          src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=0&loop=1&playlist=${ytId}&controls=0&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&showinfo=0&fs=0`}
+          data-yt-audio="1"
+          src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=${isAudioUnlocked() ? '0' : '1'}&loop=1&playlist=${ytId}&controls=0&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&enablejsapi=1`}
           title="Video" allow="autoplay; encrypted-media"
           allowFullScreen
           style={{ width:'100%', height:'100%', border:'none', display:'block' }}
