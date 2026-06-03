@@ -4,15 +4,15 @@ const YT_CHANNEL_ID  = 'UClB3scGwKSfe3CmLYYFkDoQ'; // @localaitv
 // Live stream IDs. Original Kurnool/Karimnagar/Guntur streams kept first;
 // `jfKfPfyJRdk` (stable public 24/7) used as a fallback when YouTube blocks the embed.
 // Per-channel YouTube live video IDs — one for each of the 9 channels (updated 2026-05-13).
-const YT_LIVE_KURNOOL    = 'xoU4MZlsXus';   // Kurnool TV live (updated 2026-05-26 from Mohan)
-const YT_LIVE_GUNTUR     = '1I-ESGwy9fQ';   // Guntur TV live (updated 2026-05-25 from Mohan's URL file)
-const YT_LIVE_NELLORE    = '5n_aru8yQe0';   // Nellore TV live (updated 2026-05-28 from Mohan)
-const YT_LIVE_KAKINADA   = '7qRrHTKP1zk';   // Kakinada TV live
-const YT_LIVE_TIRUPATI   = '0WBJVDnz_fc';   // Tirupati TV live (updated 2026-05-25 from Mohan)
-const YT_LIVE_KHAMMAM    = 'FWilVnvR0Es';   // Khammam TV live
-const YT_LIVE_KARIMNAGAR = 't7OrzwZW-ss';   // Karimnagar TV live
-const YT_LIVE_WARANGAL   = 'tXihAvdcML0';   // Warangal TV live (updated 2026-05-25 from Mohan's URL file)
-const YT_LIVE_NALGONDA   = 'y5POhOUUX54';   // Nalgonda TV live (updated 2026-05-25 from Mohan's URL file)
+const YT_LIVE_KURNOOL    = '3h0jXaKhnrQ';   // Kurnool TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_GUNTUR     = 'oFlhjIKO08U';   // Guntur TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_NELLORE    = '1ygxEFWtb7U';   // Nellore TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_KAKINADA   = 'Q2WTdE6BCAA';   // Kakinada TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_TIRUPATI   = 'jR5cRI8rMC8';   // Tirupati TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_KHAMMAM    = '8k2jXO76S-g';   // Khammam TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_KARIMNAGAR = 'RA292sdCTAk';   // Karimnagar TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_WARANGAL   = 'xPh1XjQ5i8E';   // Warangal TV live (updated 2026-06-03 from Warangal TV.docx)
+const YT_LIVE_NALGONDA   = 'L6YPRInS0Nw';   // Nalgonda TV live (updated 2026-06-03 from Warangal TV.docx)
 
 // Legacy aliases — keep so any code that imported the old names still works
 const YT_LIVE_VIDEO    = YT_LIVE_KURNOOL;     // Default/fallback
