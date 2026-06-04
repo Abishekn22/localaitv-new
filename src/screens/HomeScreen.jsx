@@ -234,13 +234,6 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     { id:'District',  emoji:'🏙️', te:'జిల్లా వార్తలు'      },
     { id:'State',     emoji:'🗺️', te:'రాష్ట్ర వార్తలు'     },
     { id:'National',  emoji:'🇮🇳', te:'జాతీయ వార్తలు'      },
-    { id:'World',     emoji:'🌍', te:'ప్రపంచ వార్తలు'      },
-    { id:'Devotional',emoji:'🙏', te:'భక్తి వార్తలు'       },
-    { id:'Agri',      emoji:'🌾', te:'వ్యవసాయ వార్తలు'     },
-    { id:'Business',  emoji:'💼', te:'వ్యాపార వార్తలు'     },
-    { id:'Crime',     emoji:'🚔', te:'నేర వార్తలు'         },
-    { id:'Health',    emoji:'🏥', te:'ఆరోగ్య వార్తలు'      },
-    { id:'Sports',    emoji:'🏆', te:'క్రీడా వార్తలు'      },
   ];
   // Search box (currently dead UI — hidden by default; theme toggle replaced
   // the search icon) still filters news for any future re-enable. Left intact
