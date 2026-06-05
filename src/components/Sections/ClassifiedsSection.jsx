@@ -106,6 +106,37 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
   const liveItems = locationId != null
     ? allLive.filter(c => String(c.location_id) === String(locationId))
     : allLive;
+  // DEV-only diagnostic: show exactly how many items pass each filter stage
+  // so an "empty strip" doesn't look like the API failed when really it's
+  // just verified=false. Logged once per (constituency, locationId) change.
+  // The effect itself runs unconditionally (Rules of Hooks); the body is
+  // gated on import.meta.env.DEV so production builds are silent.
+  useEffect(() => {
+    if (!(import.meta.env && import.meta.env.DEV)) return;
+    const raw = Array.isArray(liveClassifieds) ? liveClassifieds : [];
+    if (!raw.length) {
+      console.log('[Classifieds] API returned 0 items for', constituency, '— check Network tab');
+      return;
+    }
+    const byCat = raw.reduce((m, c) => { m[c.cat] = (m[c.cat] || 0) + 1; return m; }, {});
+    const verCount = raw.filter(c => c.verified === true || c.verified === 'true' || c.verified === 1 || c.verified === '1').length;
+    const locCount = locationId != null
+      ? raw.filter(c => String(c.location_id) === String(locationId)).length
+      : raw.length;
+    const passBoth = raw
+      .filter(c => c.verified === true || c.verified === 'true' || c.verified === 1 || c.verified === '1')
+      .filter(c => locationId == null || String(c.location_id) === String(locationId));
+    console.log(
+      `[Classifieds] constituency=${constituency} locationId=${locationId} | ` +
+      `API=${raw.length}, verified=${verCount}, location-match=${locCount}, BOTH=${passBoth.length}`,
+      byCat,
+    );
+    if (raw.length > 0 && passBoth.length === 0) {
+      const locs = [...new Set(raw.map(c => c.location_id))];
+      console.warn('[Classifieds] All items filtered out. Sample data location_ids in API response:', locs);
+      console.warn('[Classifieds] Sample verified values:', [...new Set(raw.map(c => c.verified))]);
+    }
+  }, [liveClassifieds, locationId, constituency]);
   // Only verified, location-matched API content: live classifieds + verified
   // Public Voice cards + verified Talent Show cards (each list is already
   // verified + location-scoped above). Dedupe by `id` (falling back to a

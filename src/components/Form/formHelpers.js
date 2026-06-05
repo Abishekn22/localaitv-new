@@ -1,22 +1,41 @@
 // Shared helpers used by the request/upload forms.
 import { API } from '../../_imports.js';
+import { getLocationIdFromName } from '../../data/regions.js';
 
 function genId(prefix) { return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,7).toUpperCase()}`; }
 
-// Returns the logged-in user's location id (numeric) from the cached auth user,
-// so every request/upload form can stamp the submitter's constituency.
-// Mirrors AuthContext STORAGE_KEY_USER ('localaitv.auth.user'); user.location
-// holds the locations table id (same value used at registration). Null if not
-// logged in or unparseable.
+// Returns the user's current location id (numeric) for forms.
+//
+// Lookup order, first match wins:
+//   1. ``localaitv.auth.user.location`` (or ``location_id``) — set by AuthContext
+//      on registration/login.
+//   2. ``localaitv_constituency`` + ``localaitv_state`` — set by LocationPicker
+//      / the channel switcher in HomeScreen via App.jsx's ``persistLocation``.
+//      Resolves to a numeric id through the regions table. This means even an
+//      anonymous user who simply opened the Kurnool channel will have their
+//      forms stamped with Kurnool's location_id (305).
+// Returns null only when BOTH paths fail (genuine first-launch, no channel
+// picked yet).
 function getUserLocationId() {
   try {
+    // Path 1 — registered/auth user
     const u = JSON.parse(localStorage.getItem('localaitv.auth.user') || 'null');
     const raw = u && (u.location ?? u.location_id);
     const n = parseInt(raw, 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
+    if (Number.isFinite(n)) return n;
+  } catch { /* fall through */ }
+
+  try {
+    // Path 2 — currently-viewed channel (set by App.jsx persistLocation)
+    const constituency = localStorage.getItem('localaitv_constituency');
+    const state        = localStorage.getItem('localaitv_state');
+    if (constituency) {
+      const id = getLocationIdFromName(constituency, state);
+      if (Number.isFinite(id)) return id;
+    }
+  } catch { /* fall through */ }
+
+  return null;
 }
 
 // ── Compliance ID generator (per IT Rules 2021 spec) ───────
