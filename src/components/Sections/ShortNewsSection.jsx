@@ -3,6 +3,7 @@ import { T, ACCENT, SEC, OTT, getNewsAccent, useAppTheme, API_BASE, YT_CHANNEL, 
 
 import KurnoolShortsScreen from './../../screens/KurnoolShortsScreen.jsx';
 import SectionAccentBar from './../SectionAccentBar.jsx';
+import { SkeletonBox } from './../atoms.jsx';
 
 // Some upload keys are stored by a backend bug as Windows local paths
 // (e.g. "C:\Users\…\file.jpg", percent-encoded). Those never exist in S3 →
@@ -13,8 +14,16 @@ function isBrokenKey(u) {
 
 // ── SHORT NEWS SECTION COMPONENT (manual scroll only) ────────
 // `items` (optional) — live incident-derived shorts from /api/incidents,
-// mapped by the parent (HomeScreen) into the SHORT_NEWS shape. When null /
-// empty the section falls back to the bundled SHORT_NEWS demo set.
+// mapped by the parent (HomeScreen) into the SHORT_NEWS shape.
+//
+// While the first fetch is in flight we show a shimmer skeleton instead
+// of the old bundled SHORT_NEWS demo set. The demo set caused a
+// jarring swap on every page load (2-3 sec after mount the demo videos
+// were replaced by completely different live videos in the same slots,
+// which read to users as "the videos shuffled"). The skeleton avoids
+// that swap — slots stay empty (clearly loading) until real data lands,
+// then real videos paint into their final positions and don't move
+// again until new uploads come in on the 3-minute refresh.
 //
 // Auto-scroll was removed per UX request — the strip is now a static
 // horizontal carousel. Users swipe (mobile) or scroll (desktop) manually.
@@ -25,11 +34,14 @@ function ShortNewsSection({ channel, items: liveItems }) {
   const [showFeed,   setShowFeed]   = useState(false);
   const scrollRef  = useRef(null);
 
-  const source = (Array.isArray(liveItems) && liveItems.length > 0) ? liveItems : SHORT_NEWS;
-  // No duplication — the strip no longer auto-scrolls so we don't need a
-  // second copy of the list for seamless wraparound.
-  const items  = source;
-  const total  = source.length;
+  // No fallback to demo data — render skeleton while live items load.
+  const items = Array.isArray(liveItems) ? liveItems : [];
+  const total = items.length;
+  const loading = !Array.isArray(liveItems) || liveItems.length === 0;
+
+  // First-paint state: show shimmer placeholders that match the real
+  // tile geometry so there's no layout shift when real data lands.
+  if (loading) return <ShortNewsSkeleton T={T} channel={channel} />;
 
   return (
     <div style={{ background:T.bg }}>
@@ -63,12 +75,17 @@ function ShortNewsSection({ channel, items: liveItems }) {
           overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}
       >
         {items.map((s, i) => (
-          <div key={i} onClick={() => {
+          // key={s.id} (with a position-based fallback) lets React track
+          // each card by identity across re-renders. When the 3-minute
+          // refresh prepends new uploads, surviving cards keep the SAME
+          // DOM node — their <video> element doesn't unmount/remount,
+          // so playback continues uninterrupted while the card slides
+          // to its new grid slot. With key={i} React would think every
+          // card was different after a prepend and reload all videos.
+          <div key={s.id ?? `pos-${i}`} onClick={() => {
               // The viewer re-sorts by uploadedAt internally, so we hand it the
-              // EXACT tapped object and let it resolve the position by identity
-              // (`items` is the source list doubled, so `i % total` is the real
-              // source index). This is robust even when live items lack/share ids.
-              const srcItem = source[i % total];
+              // EXACT tapped object and let it resolve the position by identity.
+              const srcItem = items[i % total];
               setOpenItem(srcItem);
               setOpenIdx(i % total);
             }}
@@ -131,12 +148,51 @@ function ShortNewsSection({ channel, items: liveItems }) {
       {/* Unified Feed Viewer — Shorts */}
       {openIdx !== null && (
         <KurnoolShortsScreen
-          rawItems={source}
+          rawItems={items}
           initialItem={openItem}
           initialIdx={openIdx || 0}
           onClose={() => { setOpenIdx(null); setOpenItem(null); }}
         />
       )}
+    </div>
+  );
+}
+
+// Shimmer placeholder shown while the first /api/incidents fetch is in
+// flight. Mirrors the real rail's header + 108×192 tile geometry so
+// there's no layout shift when the data arrives. Same pattern as
+// PublicVoiceSkeleton in PublicVoiceSection.jsx — kept here so the two
+// rails behave identically during loading.
+function ShortNewsSkeleton({ T, channel }) {
+  return (
+    <div style={{ background:T.bg }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+        padding:'14px 16px 10px', gap:10 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:9, minWidth:0 }}>
+          <SectionAccentBar/>
+          <div style={{ display:'flex', alignItems:'baseline', gap:6, minWidth:0 }}>
+            <span style={{ fontFamily:"'Noto Sans Telugu',sans-serif", fontWeight:800,
+              fontSize:16, color:T.text }}>
+              మన {channel ? channel.name : 'కర్నూలు'}
+            </span>
+            <span style={{
+              fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900,
+              fontSize:18, letterSpacing:1,
+              background:'linear-gradient(135deg,#0D1B5C,#1A3FCC)',
+              WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text',
+            }}>Shorts</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ display:'flex', padding:'0 16px 14px', overflow:'hidden', gap:8 }}>
+        {Array.from({ length:6 }).map((_, i) => (
+          <div key={`sn-sk-${i}`} style={{ flexShrink:0, width:108 }}>
+            <SkeletonBox style={{ width:108, height:192, borderRadius:10 }} />
+            <SkeletonBox style={{ width:'90%', height:10, borderRadius:5, marginTop:8 }} />
+            <SkeletonBox style={{ width:'60%', height:10, borderRadius:5, marginTop:5 }} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -55,6 +55,10 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     time: pv.time || '',
     date: pv.date || '',
     badge: '📢 పబ్లిక్ వాయిస్',
+    // Used by the newest-first sort below — keep parity with talentCards
+    // and liveClassifieds. Falls back through the common timestamp field
+    // names the public-voice API has been observed to use.
+    uploadedAt: pv.uploadedAt || pv.uploaded_at || pv.created_at || pv.received_at || '',
   }));
 
   // Talent Show — its own feed API (/feed/talent). Only ADMIN-VERIFIED items,
@@ -153,9 +157,23 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
     return true;
   });
 
-  // Randomly shuffle for display on home page — memoised so it doesn't re-shuffle on every re-render
-  const shuffled = useMemo(() => [...all].sort(() => Math.random() - 0.5), [all]);
-  const filtered = cat === 'All' ? shuffled : all.filter(c => c.cat === cat);
+  // Newest-first stable order — same items, same positions on every
+  // refresh. When a refresh brings in new uploads they prepend at
+  // position 0 (highest uploadedAt) and existing items shift right by
+  // N positions. Cards keep their React identity via key={cl.id} below,
+  // so existing <video>/<img> DOM nodes don't unmount/remount — they
+  // smoothly slide to their new slot without reloading. Replaces the
+  // previous `Math.random()` shuffle that was re-running on every
+  // 3-min refresh and made items look like they were teleporting
+  // between positions.
+  const sorted = useMemo(
+    () => [...all].sort((a, b) =>
+      new Date(b.uploadedAt || b.created_at || 0) - new Date(a.uploadedAt || a.created_at || 0)),
+    [all]
+  );
+  // Filter from the SORTED list (not the raw `all`) so category-pill
+  // selections also get newest-first ordering.
+  const filtered = cat === 'All' ? sorted : sorted.filter(c => c.cat === cat);
 
   // Auto-scroll removed per UX request — the strip is now a static
   // horizontal carousel. Native browser scrolling (overflowX:'auto' below)
@@ -301,7 +319,17 @@ function ClassifiedsSection({ onNavigate, constituency, channel, locationId }) {
             const vid = (Array.isArray(cl.videos) ? cl.videos : []).find(u => !isBrokenKey(u)) || null;
             const img = (Array.isArray(cl.images) ? cl.images : []).find(u => !isBrokenKey(u)) || null;
             return (
-            <div key={cl.id+'-'+i} onClick={()=>openItem(cl)}
+            // key={cl.id} alone (not `cl.id+'-'+i`) so React keeps the SAME
+            // DOM node for each card across re-renders. When new uploads
+            // prepend at position 0 every existing card's index changes,
+            // but its id doesn't — React diffs by id, keeps the existing
+            // <video>/<img> mounted, and just slides the node to its new
+            // grid slot. With the index appended, every card would get a
+            // new key after a prepend and React would unmount+remount all
+            // cards (videos reload, flash, lose playback position). The
+            // `_seenKeys` dedupe above already guarantees unique ids, so
+            // the index suffix was redundant defense.
+            <div key={cl.id ?? `cl-pos-${i}`} onClick={()=>openItem(cl)}
               style={{flexShrink:0,width:155,borderRadius:14,overflow:'hidden',
                 border:`1px solid ${T.border}`,cursor:'pointer',
                 background:T.bg2,

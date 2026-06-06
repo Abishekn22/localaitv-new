@@ -130,18 +130,25 @@ function PublicVoiceSection({ onNavigate, channel, locationId }) {
             <div style={{ width:108, height:192, borderRadius:10, overflow:'hidden',
               background:'#111', position:'relative' }}>
               {hasVideo ? (
-                // Use the live uploaded video as the thumbnail itself — autoplay
-                // muted/looped silently. `preload="metadata"` + `#t=0.1` reliably
-                // renders black on most mobile browsers (the first frame never
-                // gets decoded without playback), so we just play it. Tap →
-                // fullscreen feed for the full clip with audio.
+                // Use the live uploaded video as the thumbnail itself. Two
+                // critical attributes (mirrors ClassifiedsSection's working
+                // approach) keep the tile from rendering as a black box:
+                //   • `#t=0.1` URL fragment — forces the browser to seek to
+                //     100 ms and decode that frame, so a real frame paints
+                //     even when autoplay is throttled (very common when 10+
+                //     <video> elements mount simultaneously).
+                //   • `poster={…}` — uploader-provided image shows until the
+                //     first video frame is painted, so the tile never falls
+                //     back to the all-black `background` fill.
+                // Tap → fullscreen feed for the full clip with audio.
                 <video
-                  src={s.videos[0]}
+                  src={s.videos[0] + '#t=0.1'}
+                  poster={thumb ? safeImageUrl(thumb) : undefined}
                   muted
                   autoPlay
                   loop
                   playsInline
-                  preload="auto"
+                  preload="metadata"
                   draggable={false}
                   style={{ width:'100%', height:'100%', objectFit:'cover', pointerEvents:'none', background:'#000' }}
                   onError={e => { e.target.style.display = 'none'; }}

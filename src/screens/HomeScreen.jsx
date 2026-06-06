@@ -90,12 +90,18 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   const displayConstituency = userConstituency || 'Kurnool';
   const displayState        = userState        || 'AP';
 
-  // ── LIVE API FEEDS — auto-refresh every 5 min ─────────────
+  // ── LIVE API FEEDS — auto-refresh every 3 min ─────────────
   // (The /api/news feed was removed from the project; Top Stories renders the
   //  static NEWS_ITEMS set. Bulletins and incidents below are still live.)
+  // Refresh cadence dropped 5 min → 3 min so newly-uploaded incident videos
+  // appear in the Shorts rail more quickly. New videos prepend at position 0
+  // (sort = created_at DESC) and existing videos keep React identity via
+  // key={incident.id}, so the surviving cards just shift right by N — they
+  // do NOT reload or replay. No CSS animation either; the swap is a single
+  // React reconciliation pass, invisible unless you're looking leftmost.
   const [refreshTick, setRefreshTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setRefreshTick(v => v + 1), 5 * 60 * 1000); // 5 min
+    const t = setInterval(() => setRefreshTick(v => v + 1), 3 * 60 * 1000); // 3 min
     return () => clearInterval(t);
   }, []);
 
@@ -213,8 +219,17 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   const bulletinsToShow= (Array.isArray(liveBulletins) && liveBulletins.length > 0)
     ? filterBulletinsByLocation(liveBulletins, { id: activeLocationId, name: activeChannel?.name, nameEn: activeChannel?.nameEn }).map(mapBulletin)
     : BULLETINS;
+  // Newest-first stable order: same incidents → same DOM order → no
+  // visible reshuffle on 3-minute background refreshes. When a refresh
+  // returns N new uploads, they prepend at positions 0..N-1; the
+  // surviving items keep their React identity (key={incident.id}
+  // inside ShortNewsSection) and just shift right by N. Cards never
+  // get unmounted/remounted, so the underlying <video> elements don't
+  // reload — they continue playing through the data refresh.
   const incidentShorts = (Array.isArray(liveIncidents) && liveIncidents.length > 0)
-    ? liveIncidents.map(mapIncidentToShort)
+    ? [...liveIncidents]
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        .map(mapIncidentToShort)
     : null;
 
   // Pulse viewer count every 5 seconds
