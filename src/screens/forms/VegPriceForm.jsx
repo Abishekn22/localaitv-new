@@ -95,7 +95,11 @@ function VegPriceForm({ onBack }) {
           sno:            r.sno,
           name_telugu:    r.name_telugu,
           vegetable_name: r.name_telugu,
-          price_per_kg:   parseFloat(r.price),
+          // Send the price as a RAW STRING so the backend's
+          // /api/price-entries handler can detect ratio formats
+          // like "6/7" (= 6 rupees for 7 pieces). parseFloat() would
+          // silently drop "/7" before it reaches the server.
+          price_per_kg:   String(r.price).trim(),
           price_type:     r.price_type,
         }));
       const res = await fetch(`${API}/price-entries`, {
@@ -207,12 +211,27 @@ function VegPriceForm({ onBack }) {
                     {r.name_telugu}
                   </div>
 
-                  {/* Price input */}
+                  {/* Price input — type="text" + inputMode="decimal" instead
+                      of type="number". The number type has hidden behaviors
+                      that silently corrupt the entered value:
+                        • mouse-wheel scroll on a focused input increments /
+                          decrements by 1 per tick (most common cause of
+                          ±2 / ±3 drift while the user scrolls the form),
+                        • ↑ / ↓ arrow keys also change the value by 1,
+                        • desktop browsers render tiny spinner buttons that
+                          are easy to mis-click,
+                        • a stray leading "-" produces negative prices.
+                      Switching to type="text" with inputMode="decimal" keeps
+                      the mobile numeric keypad but kills all four issues.
+                      The onChange filter strips anything that isn't a digit
+                      or decimal point so the value still parses as a number. */}
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[./]?[0-9]*"
                     value={r.price}
-                    onChange={e=>updateRow(i,'price',e.target.value)}
-                    placeholder="ఉదా: 30"
+                    onChange={e=>updateRow(i,'price',e.target.value.replace(/[^0-9./]/g, ''))}
+                    placeholder="ఉదా: 30 లేదా 6/7"
                     style={{
                       width:'100%',
                       border:'1px solid #d4d4d8',
