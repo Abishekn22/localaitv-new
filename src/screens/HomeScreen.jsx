@@ -188,6 +188,28 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
     [activeLocationId, refreshTick]
   );
 
+  // /api/notebooklm/bulletins — processed NotebookLM bulletins (intro + anchors
+  // wrapped around the raw upload by the streamer). Lives on Gyana's separate
+  // Flask backend at VITE_NOTEBOOKLM_API_URL, NOT on our Node backend — so we
+  // can't go through apiCall(). Public endpoint, no auth needed (per
+  // NOTEBOOKLM_FULLSTACK_HANDOFF.md). Each item has:
+  //   { channel, location_id, kind, filename, key, url, size, lastModified }
+  // where kind ∈ { 'local' | 'district' | 'state' | 'national' }.
+  // We fetch ALL items (no server-side filter) and filter client-side by the
+  // selected category tab + active channel's location. This keeps the API
+  // round-trips down to one per refresh.
+  const NOTEBOOKLM_API_URL = import.meta.env.VITE_NOTEBOOKLM_API_URL || '';
+  const { data: liveNotebookLM } = useAPI(
+    () => {
+      if (!NOTEBOOKLM_API_URL) return Promise.resolve([]);
+      return fetch(`${NOTEBOOKLM_API_URL}/api/notebooklm/bulletins`)
+        .then(r => r.ok ? r.json() : { items: [] })
+        .then(d => d.items || []);
+    },
+    [],
+    [refreshTick]
+  );
+
   // Incident → SHORT_NEWS shape adapter + media URL resolver are shared
   // with the App-level 'shortsfeed' route via src/data/incidents.js so
   // both feeds project incidents the same way.
@@ -263,16 +285,107 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   // Top Stories rail is sourced from /api/incidents (live citizen-reporter
   // short videos), not /api/news. Category pills below the header are kept
   // as UI only — setCat still fires but no filtering is applied, since
-  // incidents don't currently carry the news category taxonomy. When the
-  // backend starts returning category-tagged incidents, wire the filter back
-  // in here. Empty rail when the API returns nothing — no static fallback.
+  // incidents don't currently carry the news category taxonomy.
   const incidentsRailItems = useMemo(
     () => (Array.isArray(liveIncidents) ? liveIncidents.map(mapIncidentToRailItem) : []),
     [liveIncidents]
   );
-  // Top Stories rail shows the newest 10 incidents (indices 0–9). The newest
-  // one (index 0) renders as the big LEAD STORY card; the rest are secondary.
-  const filteredHome = useMemo(() => incidentsRailItems.slice(0, 10), [incidentsRailItems]);
+
+  // NotebookLM bulletin → rail-item shape. The rail's existing card UI
+  // expects { id, title, cat, source, channel, time, live, link, ytId,
+  // thumbnail, mediaUrl, uploadedAt }. NotebookLM gives us slightly
+  // different fields, so we adapt them:
+  //   - thumbnail: empty (the rail card falls back to a poster or category
+  //     emoji; NotebookLM bulletins don't have a separate thumbnail image)
+  //   - mediaUrl: the presigned .mp4 URL (drops into <video> directly,
+  //     expires in 1h — we re-fetch on refreshTick so the cache stays fresh)
+  //   - cat: derived from `kind` so the filter logic below can match
+  //     against the same 'District' / 'State' / 'National' / 'All' values
+  //     the category pills use.
+  const mapNotebookLMToRailItem = (it) => {
+    // kind → cat: 'local' & 'district' both surface under the District tab;
+    // 'state' → State tab; 'national' → National tab.
+    const k = (it?.kind || '').toLowerCase();
+    const cat = k === 'state'    ? 'State'
+              : k === 'national' ? 'National'
+              : 'District'; // local + district + anything else
+    return {
+      id:         it?.key || it?.filename,
+      title:      it?.filename || 'NotebookLM Bulletin',
+      cat,
+      source:     'LocalAI TV',
+      channel:    it?.channel || activeChannel?.nameEn || 'LocalAI TV',
+      time:       it?.lastModified
+        ? new Date(it.lastModified).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })
+        : '',
+      live:       false,
+      link:       null,
+      ytId:       null,
+      thumbnail:  '',
+      mediaUrl:   it?.url || '',
+      uploadedAt: it?.lastModified || null,
+      // Original NotebookLM fields preserved so downstream viewers can
+      // distinguish bulletin-type items if they want to.
+      _kind:        k,
+      _location_id: it?.location_id,
+    };
+  };
+
+  // Project + filter the NotebookLM bulletins by the selected category tab
+  // AND the user's currently-active location.
+  //
+  // Per NOTEBOOKLM_FULLSTACK_HANDOFF.md §2.2-2.3 ("fan-out" model): the
+  // backend streamer produces a SEPARATE processed bulletin per destination
+  // channel for every upload — even state-scope uploads get fanned out into
+  // multiple processed bulletins (one per district in that state), each
+  // tagged with that district's location_id. So every item we receive has
+  // a location_id we can filter against, regardless of kind.
+  //
+  // Filtering rules (all scoped to the current channel's location_id):
+  //   - cat 'District':  district/local bulletins for THIS location_id.
+  //   - cat 'State':     state bulletins for THIS location_id (the
+  //                       state-wide upload fanned out to this district).
+  //   - cat 'National':  national bulletins for THIS location_id
+  //                       (currently empty — see §7 caveat: national
+  //                        scope isn't processed yet).
+  //   - cat 'All':       any of the above.
+  // Sort newest-first, then take top 10 for the rail.
+  const notebookLMRailItems = useMemo(() => {
+    if (!Array.isArray(liveNotebookLM)) return [];
+    const locId = activeLocationId != null ? String(activeLocationId) : null;
+
+    const filtered = liveNotebookLM.filter(it => {
+      const k = (it?.kind || '').toLowerCase();
+      const itLocId = it?.location_id != null ? String(it.location_id) : null;
+      const isMine = !locId || itLocId === locId;
+
+      if (cat === 'District') return isMine && (k === 'district' || k === 'local');
+      if (cat === 'State')    return isMine && k === 'state';
+      if (cat === 'National') return isMine && k === 'national';
+      // 'All' tab → any of the kinds, scoped to this location.
+      return isMine && (k === 'district' || k === 'local' || k === 'state' || k === 'national');
+    });
+
+    // Newest first by lastModified.
+    filtered.sort((a, b) => {
+      const da = new Date(a?.lastModified || 0).getTime();
+      const db = new Date(b?.lastModified || 0).getTime();
+      return db - da;
+    });
+
+    return filtered.map(mapNotebookLMToRailItem);
+  }, [liveNotebookLM, cat, activeLocationId, activeChannel?.nameEn]);
+
+  // The rail's data source. When NotebookLM bulletins exist for the current
+  // (cat, location) combination, show them — they are the editorial content
+  // for the kurnool జిల్లా వార్తలు section. When NotebookLM has nothing for
+  // this combo yet, fall back to live incidents so the section never goes
+  // empty during the rollout window. LEAD STORY (idx === 0) is the newest;
+  // remaining indices are the secondary cards.
+  const filteredHome = useMemo(() => {
+    if (notebookLMRailItems.length > 0) return notebookLMRailItems.slice(0, 10);
+    return incidentsRailItems.slice(0, 10);
+  }, [notebookLMRailItems, incidentsRailItems]);
 
   return (
     <div className="ott-screen-in"
@@ -2042,7 +2155,12 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
             onClose={() => setTopStoriesViewerIdx(null)}
             startCat="All"
             startIdx={topStoriesViewerIdx}
-            items={incidentsRailItems}
+            // Pass the SAME list the rail is showing. `filteredHome` prefers
+            // NotebookLM bulletins (when available for the current cat +
+            // location) and falls back to incidents otherwise. Without this,
+            // clicking a NotebookLM card would open the viewer pointing at
+            // incidents data → wrong video plays.
+            items={filteredHome}
             disableCategoryFilter
           />
         </div>
