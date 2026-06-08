@@ -187,14 +187,10 @@ function NotebookLMUploader() {
 
   const reachesText = useMemo(() => {
     if (scope === 'national') {
-      // Per NOTEBOOKLM_FULLSTACK_HANDOFF.md §7: "national scope is not
-      // processed yet — a national upload is stored but does not currently
-      // produce a bulletin." Surfacing this here so admins don't get a
-      // silent no-show after uploading.
-      return '⚠️ NOTE: National uploads are stored in S3 but the backend ' +
-             'streamer does NOT process them yet. The upload will succeed, ' +
-             'but no processed bulletin will appear on any channel. Use ' +
-             'State / District scope until Gyana confirms national is live.';
+      // National processing is now live (per the latest backend handoff
+      // update). The streamer wraps each national upload with intro +
+      // anchor and fans it out to every channel.
+      return 'Plays on every channel (all districts in AP + Telangana).';
     }
     if (scope === 'state') {
       if (!state) return '';
@@ -558,30 +554,49 @@ function NotebookLMUploader() {
             intro + anchors — usually appears within a few minutes of upload.
           </div>
         )}
-        {!recentLoading && recent.map((it, i) => (
-          <div key={it.key || i} style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 0', borderTop: i > 0 ? `1px solid ${T.border}` : 'none',
-          }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: T.text, wordBreak: 'break-all' }}>
-                {it.filename}
+        {!recentLoading && recent.map((it, i) => {
+          // Display rule (per backend handoff): show the API's `title` and
+          // `date` fields. `filename` is internal-only — never displayed.
+          // Fallback titles keep the rail readable if the API hasn't filled
+          // in a title for some older items yet.
+          const kindLabel = (it?.kind || '').toLowerCase();
+          const fallbackTitle =
+              kindLabel === 'state'    ? 'రాష్ట్ర వార్తలు'
+            : kindLabel === 'national' ? 'జాతీయ వార్తలు'
+            : kindLabel === 'district' ? 'జిల్లా వార్తలు'
+            : kindLabel === 'local'    ? 'లోకల్ వార్తలు'
+            : 'NotebookLM Bulletin';
+          const displayTitle = it?.title || fallbackTitle;
+          const displayDate  = it?.date
+                              || (it?.lastModified
+                                  ? new Date(it.lastModified).toLocaleDateString('en-GB').replace(/\//g,'-')
+                                  : '');
+          return (
+            <div key={it.key || i} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 0', borderTop: i > 0 ? `1px solid ${T.border}` : 'none',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: T.text, wordBreak: 'break-word' }}>
+                  {displayTitle}
+                </div>
+                <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 3 }}>
+                  {displayDate && <span>{displayDate} · </span>}
+                  {it.channel && <span>{it.channel} · </span>}
+                  {it.kind && <span>{it.kind} · </span>}
+                  {(it.size / 1024 / 1024).toFixed(1)} MB
+                </div>
               </div>
-              <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 3 }}>
-                {it.channel && <span>{it.channel} · </span>}
-                {it.kind && <span>{it.kind} · </span>}
-                {(it.size / 1024 / 1024).toFixed(1)} MB · {new Date(it.lastModified).toLocaleString()}
-              </div>
+              {it.url && (
+                <a href={it.url} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 11, color: T.textMuted, textDecoration: 'none',
+                            padding: '4px 8px', border: `1px solid ${T.border}`, borderRadius: 6 }}>
+                  ▶ Play
+                </a>
+              )}
             </div>
-            {it.url && (
-              <a href={it.url} target="_blank" rel="noreferrer"
-                style={{ fontSize: 11, color: T.textMuted, textDecoration: 'none',
-                          padding: '4px 8px', border: `1px solid ${T.border}`, borderRadius: 6 }}>
-                ▶ Play
-              </a>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

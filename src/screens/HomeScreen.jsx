@@ -295,6 +295,11 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
   // expects { id, title, cat, source, channel, time, live, link, ytId,
   // thumbnail, mediaUrl, uploadedAt }. NotebookLM gives us slightly
   // different fields, so we adapt them:
+  //   - title: prefer the API's display `title` (e.g. "జాతీయ వార్తలు");
+  //     never show `filename` to end users (it's internal-only per the
+  //     pending-changes doc).
+  //   - date: API's `date` field is a pre-formatted display string
+  //     (e.g. "08-06-2026") — used directly for the visible date label.
   //   - thumbnail: empty (the rail card falls back to a poster or category
   //     emoji; NotebookLM bulletins don't have a separate thumbnail image)
   //   - mediaUrl: the presigned .mp4 URL (drops into <video> directly,
@@ -311,13 +316,23 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
               : 'District'; // local + district + anything else
     return {
       id:         it?.key || it?.filename,
-      title:      it?.filename || 'NotebookLM Bulletin',
+      // Display title — NEVER the raw filename. If the API hasn't filled in
+      // a title yet, fall back to a generic category label so the rail
+      // never shows "jatiya_vaartalu_20260608.mp4"-style internal names.
+      title:      it?.title || (k === 'state'    ? 'రాష్ట్ర వార్తలు'
+                              : k === 'national' ? 'జాతీయ వార్తలు'
+                              : k === 'district' ? 'జిల్లా వార్తలు'
+                              : 'వార్తలు'),
       cat,
       source:     'LocalAI TV',
       channel:    it?.channel || activeChannel?.nameEn || 'LocalAI TV',
-      time:       it?.lastModified
-        ? new Date(it.lastModified).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })
-        : '',
+      // Date label — API's `date` (already formatted like "08-06-2026") wins;
+      // otherwise derive from lastModified as a fallback. We keep this in the
+      // `time` field so the existing rail card renders it without UI changes.
+      time:       it?.date
+                  || (it?.lastModified
+                      ? new Date(it.lastModified).toLocaleDateString('en-GB').replace(/\//g,'-')
+                      : ''),
       live:       false,
       link:       null,
       ytId:       null,
@@ -325,9 +340,11 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
       mediaUrl:   it?.url || '',
       uploadedAt: it?.lastModified || null,
       // Original NotebookLM fields preserved so downstream viewers can
-      // distinguish bulletin-type items if they want to.
+      // distinguish bulletin-type items if they want to. _filename is kept
+      // for debugging/links only — never displayed in the UI.
       _kind:        k,
       _location_id: it?.location_id,
+      _filename:    it?.filename,
     };
   };
 
