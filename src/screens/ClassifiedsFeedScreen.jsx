@@ -113,14 +113,16 @@ function ClassifiedsFeedScreen({ onClose, startItemId = null, startItem = null, 
           up to 20 thin segments that the user found visually noisy. */}
       {/* Discreet back button only — title / index / share removed per user request.
           LocalAI TV logo is now on the media itself, share lives in the action bar. */}
-      <button onClick={onClose} style={{
-        position:'absolute', top:18, left:14, zIndex:26,
-        width:36, height:36, borderRadius:'50%',
+      <button onClick={onClose}
+        onTouchEnd={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+        aria-label="Back" style={{
+        position:'absolute', top:18, left:14, zIndex:100,
+        width:40, height:40, borderRadius:'50%',
         background:'rgba(0,0,0,0.55)',
         border:'1.5px solid rgba(255,255,255,0.22)',
         color:'white', fontSize:18, cursor:'pointer',
         display:'flex', alignItems:'center', justifyContent:'center',
-        backdropFilter:'blur(8px)' }}>←</button>
+        backdropFilter:'blur(8px)', touchAction:'manipulation' }}>←</button>
       {/* Feed — native scroll-snap vertical shorts (one swipe = one short, smooth
             momentum scrolling, infinite loop). The scroller is a flex child so it
             occupies exactly the space ABOVE the category bar; each slide is one
