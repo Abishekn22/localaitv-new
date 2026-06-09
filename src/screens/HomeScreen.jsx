@@ -460,26 +460,24 @@ function HomeScreen({ onNavigate, onOpenNews, onReport, onLogoTap, userConstitue
             {/* Animated MP4 — LIGHT MODE ONLY (it's a white-background asset).
                 In Dark mode the adaptive SVG <Logo dark> stays visible instead. */}
             {!isDark && (
-            <video
-              src="home-page-header-logo.mp4"
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="auto"
+            <img
+              src="header-logo.png"
+              alt="LocalAI TV"
               style={{
                 height:43, width:'auto', display:'block', objectFit:'contain',
                 position:'relative', zIndex:2,
                 opacity:0, transition:'opacity 0.25s ease',
               }}
-              onCanPlay={e=>{
-                // Video is buffered enough to play — fade it in and fade the SVG out
+              onLoad={e=>{
+                // PNG loaded — fade it in and fade the instant SVG placeholder out.
+                // height:43 + width:auto + objectFit:contain preserves the logo's
+                // original aspect ratio (no stretch / crop / distortion).
                 e.target.style.opacity = '1';
                 const svg = e.target.previousSibling;
                 if (svg) svg.style.opacity = '0';
               }}
               onError={e=>{
-                // Hide the broken video; SVG fallback stays visible
+                // Hide a broken image; the SVG fallback stays visible
                 e.target.style.display='none';
               }}
             />

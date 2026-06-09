@@ -39,6 +39,40 @@ function ShortNewsSection({ channel, items: liveItems }) {
   const total = items.length;
   const loading = !Array.isArray(liveItems) || liveItems.length === 0;
 
+  // ── Infinite circular carousel (manual scroll only — no auto-scroll) ──
+  // Repeat the items so one "cycle" copy is always wider than the viewport,
+  // render THREE copies, and park the scroll in the middle copy. When a swipe
+  // drifts scrollLeft into an outer copy we snap it back by exactly one cycle
+  // width — pixel-identical (the copies are duplicates), so the jump is
+  // invisible and the rail loops endlessly in both directions. The parent
+  // supplies items newest-first, and the copies preserve that order, so the
+  // newest uploads always lead and the loop keeps cycling through everything.
+  const CARD_W = 116; // 108 card + 8 gap
+  const baseW  = total * CARD_W;
+  const viewportW = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 480;
+  const reps   = total ? Math.max(1, Math.ceil((viewportW + CARD_W) / baseW)) : 1;
+  const unit   = [];
+  for (let r = 0; r < reps; r++) unit.push(...items);
+  const cycleW = unit.length * CARD_W;
+  const looped = total ? [...unit, ...unit, ...unit] : [];
+
+  const initialisedRef = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !cycleW) return;
+    // Park in the MIDDLE copy on first data load so the user can swipe either way.
+    if (!initialisedRef.current) { el.scrollLeft = cycleW; initialisedRef.current = true; }
+  }, [cycleW]);
+
+  // Seamless wrap on manual scroll — when scrollLeft drifts past the middle copy
+  // in either direction, snap back by exactly one cycle width (invisible jump).
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el || !cycleW) return;
+    if (el.scrollLeft >= 2 * cycleW)       el.scrollLeft -= cycleW;
+    else if (el.scrollLeft < cycleW * 0.5) el.scrollLeft += cycleW;
+  };
+
   // First-paint state: show shimmer placeholders that match the real
   // tile geometry so there's no layout shift when real data lands.
   if (loading) return <ShortNewsSkeleton T={T} channel={channel} />;
@@ -71,10 +105,11 @@ function ShortNewsSection({ channel, items: liveItems }) {
           Static carousel — manual swipe (mobile) or scroll (desktop) only. */}
       <div
         ref={scrollRef}
+        onScroll={onScroll}
         style={{ display:'flex', gap:8, padding:'0 16px 14px',
           overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}
       >
-        {items.map((s, i) => (
+        {looped.map((s, i) => (
           // key={s.id} (with a position-based fallback) lets React track
           // each card by identity across re-renders. When the 3-minute
           // refresh prepends new uploads, surviving cards keep the SAME
@@ -82,9 +117,10 @@ function ShortNewsSection({ channel, items: liveItems }) {
           // so playback continues uninterrupted while the card slides
           // to its new grid slot. With key={i} React would think every
           // card was different after a prepend and reload all videos.
-          <div key={s.id ?? `pos-${i}`} onClick={() => {
-              // The viewer re-sorts by uploadedAt internally, so we hand it the
-              // EXACT tapped object and let it resolve the position by identity.
+          <div key={`${s.id ?? 'p'}-${i}`} onClick={() => {
+              // looped[i] repeats the source list, so the real source index is
+              // i % total. Hand the viewer the EXACT tapped object (it resolves
+              // position by identity after its internal newest-first sort).
               const srcItem = items[i % total];
               setOpenItem(srcItem);
               setOpenIdx(i % total);

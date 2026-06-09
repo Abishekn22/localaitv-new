@@ -135,11 +135,14 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0, items
         background:'linear-gradient(135deg,#E8001E 0%,#D0021B 100%)',
         padding:'52px 14px 14px', display:'flex', alignItems:'center', gap:12, flexShrink:0,
       }}>
-        <button onClick={onClose} style={{
+        <button onClick={onClose}
+          onTouchEnd={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+          aria-label="Back" style={{
           width:38, height:38, borderRadius:'50%', flexShrink:0,
           background:'rgba(0,0,0,0.25)', border:'1.5px solid rgba(255,255,255,0.25)',
           color:'#FFFFFF', fontSize:18, cursor:'pointer',
           display:'flex', alignItems:'center', justifyContent:'center',
+          touchAction:'manipulation',
         }}>←</button>
         <div style={{ flex:1, textAlign:'center' }}>
           <div style={{ fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",
@@ -170,11 +173,14 @@ function DistrictNewsFeedScreen({ onClose, startCat = 'All', startIdx = 0, items
         padding:'52px 14px 14px',
         display:'flex', alignItems:'center', gap:12, flexShrink:0, zIndex:30,
       }}>
-        <button onClick={onClose} style={{
+        <button onClick={onClose}
+          onTouchEnd={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+          aria-label="Back" style={{
           width:38, height:38, borderRadius:'50%', flexShrink:0,
           background:'rgba(0,0,0,0.25)', border:'1.5px solid rgba(255,255,255,0.25)',
           color:'#FFFFFF', fontSize:18, cursor:'pointer',
           display:'flex', alignItems:'center', justifyContent:'center',
+          touchAction:'manipulation',
         }}>←</button>
         <div style={{ flex:1, minWidth:0, textAlign:'center' }}>
           <div style={{ fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",

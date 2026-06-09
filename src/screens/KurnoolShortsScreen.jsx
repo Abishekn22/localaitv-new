@@ -55,12 +55,15 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, initialItem = null, init
       <div style={{ position:'fixed', inset:0, zIndex:300, background:'#000',
         display:'flex', alignItems:'center', justifyContent:'center' }}>
         <button onClick={onClose}
-          style={{ position:'absolute', top:18, left:14, zIndex:21,
-            width:36, height:36, borderRadius:'50%',
+          onTouchEnd={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+          aria-label="Back"
+          style={{ position:'absolute', top:18, left:14, zIndex:100,
+            width:40, height:40, borderRadius:'50%',
             background:'rgba(0,0,0,0.55)',
             border:'1.5px solid rgba(255,255,255,0.22)',
             color:'white', fontSize:18, cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>←</button>
+            display:'flex', alignItems:'center', justifyContent:'center',
+            touchAction:'manipulation' }}>←</button>
         <div style={{ textAlign:'center', padding:'0 24px' }}>
           <div style={{ fontFamily:"'Noto Sans Telugu',sans-serif",
             fontWeight:800, fontSize:20, lineHeight:1.4,
@@ -86,13 +89,15 @@ function KurnoolShortsScreen({ onClose, initialIdx = 0, initialItem = null, init
       {/* Discreet back button only — title / index / date removed per user request.
           The LocalAI TV channel logo now sits in the top-right corner of the video itself. */}
       <button onClick={onClose}
-        style={{ position:'absolute', top:18, left:14, zIndex:21,
-          width:36, height:36, borderRadius:'50%',
+        onTouchEnd={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+        aria-label="Back"
+        style={{ position:'absolute', top:18, left:14, zIndex:100,
+          width:40, height:40, borderRadius:'50%',
           background:'rgba(0,0,0,0.55)',
           border:'1.5px solid rgba(255,255,255,0.22)',
           color:'white', fontSize:18, cursor:'pointer',
           display:'flex', alignItems:'center', justifyContent:'center',
-          pointerEvents:'all' }}>←</button>
+          pointerEvents:'all', touchAction:'manipulation' }}>←</button>
 
       {/* ── NATIVE SCROLL-SNAP SHORTS FEED ──
             One swipe = one short, smooth momentum scrolling, infinite loop. */}
