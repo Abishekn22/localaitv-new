@@ -35,6 +35,11 @@ function AdminDashboardScreen({ onBack }) {
   const [period, setPeriod] = useState('today'); // time filter for analytics
   const [drill, setDrill] = useState([]);       // drill-down navigation stack
   const pushDrill = (f) => setDrill(d => [...d, f]);
+  // Open the right drill for a tapped content-analytics tile (m = METRICS entry).
+  const openMetric = (m) => {
+    if (m.drill === 'metric') pushDrill({ type:'metric', metric:m.key });
+    else pushDrill({ type: m.drill }); // 'reporters' (all reporters) | 'conslist' (constituency perf)
+  };
   const scrollRef = useRef(null);               // main scroll container
   // Always open a view/drill from the top — never auto-land at the bottom.
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [view, drill.length]);
@@ -252,6 +257,20 @@ function AdminDashboardScreen({ onBack }) {
     } catch { /* non-blocking — KPI falls back to a placeholder */ }
   }, [adminFetch]);
 
+  // ── Live analytics summary (reports table) — feeds the Content-Analytics
+  // tiles and the drill-down. Re-pulled whenever the period tab changes.
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsErr, setAnalyticsErr] = useState('');
+  const loadAnalytics = useCallback(async (p) => {
+    setAnalyticsLoading(true); setAnalyticsErr('');
+    try {
+      const d = await adminFetch(`/admin/analytics/summary?period=${encodeURIComponent(p || 'today')}`);
+      setAnalytics(d || null);
+    } catch (e) { setAnalyticsErr(e.message || 'Failed to load analytics'); setAnalytics(null); }
+    finally { setAnalyticsLoading(false); }
+  }, [adminFetch]);
+
   const fetchReportsPage = useCallback(async (offset) => {
     const d = await adminFetch(`/webhooks/reports?offset=${offset}&limit=${REPORTS_PAGE}`);
     return d.items || d.data || (Array.isArray(d) ? d : []);
@@ -322,6 +341,9 @@ function AdminDashboardScreen({ onBack }) {
   // Load on mount: user list (Citizens KPI) + report counts (Pending Review KPI)
   // + classifieds (Classifieds KPI + Analytics). All hit live production APIs.
   useEffect(() => { loadUsers(); loadReportStats(); loadClassifieds(); }, [loadUsers, loadReportStats, loadClassifieds]);
+
+  // Pull the analytics summary on mount and on every period-tab change.
+  useEffect(() => { loadAnalytics(period); }, [period, loadAnalytics]);
 
   // Analytics & Audit modules aggregate the same live data the rest of the
   // dashboard uses — pull every source when those views open so the numbers
@@ -527,16 +549,6 @@ function AdminDashboardScreen({ onBack }) {
     { key:'notebooklm', icon:'🎙️', title:'NotebookLM Upload',  sub:'Bulletins → Gyan’s S3 (geo/*)',  need:null },
   ];
 
-  // ── Sample moderation queue (Telugu, faithful to v1.3 §4 workflow) ──
-  const QUEUE = [
-    { t:'కర్నూలు జిల్లాలో భారీ వర్షాలు — లోతట్టు ప్రాంతాలు జలమయం', cat:'News',     loc:'Kurnool, AP',     by:'ravi_k',      age:'4m',  st:'pending'   },
-    { t:'శ్రీమతి సరోజమ్మ గారికి 75వ పుట్టినరోజు శుభాకాంక్షలు',     cat:'Birthday', loc:'Guntur, AP',      by:'public_2291', age:'12m', st:'pending'   },
-    { t:'విజయవాడలో కొత్త ఫ్లైఓవర్ ప్రారంభం — ట్రాఫిక్ ఉపశమనం',    cat:'News',     loc:'Vijayawada, AP',  by:'suresh.r',    age:'26m', st:'in_review', mine:true,  lock:'⏳ Claimed by you · 28:11 left' },
-    { t:'2BHK ఇల్లు అద్దెకు — హైదరాబాద్ కూకట్‌పల్లి',              cat:'Rental',   loc:'Hyderabad, TG',   by:'owner_88',    age:'41m', st:'in_review', lock:'🔒 Claimed by Lakshmi (Admin)' },
-    { t:'పాత కారు అమ్మకం — Maruti Swift 2018, సింగిల్ ఓనర్',      cat:'Vehicle',  loc:'Warangal, TG',    by:'auto_sell',   age:'1h',  st:'escalated' },
-    { t:'Suspicious job posting with external links',             cat:'Jobs',     loc:'Nellore, AP',     by:'spam_acc',    age:'2h',  st:'pending', flag:true },
-  ];
-
   // ── status enum → colour (content_status, Plan v1.3) ──
   const STC = {
     pending:'#F59E0B', in_review:'#3B82F6', approved:'#10B981', rejected:'#EF4444',
@@ -594,20 +606,27 @@ function AdminDashboardScreen({ onBack }) {
   };
   const statusKeys = Object.keys(STATUS);
 
-  const PERIODS = [['today','Today',1],['yesterday','Yesterday',0.9],['weekly','Weekly',6.3],
-    ['monthly','Monthly',26],['quarterly','Quarterly',78],['yearly','Yearly',310],['custom','Custom',12]];
+  const PERIODS = [['today','Today'],['yesterday','Yesterday'],['weekly','Weekly'],
+    ['monthly','Monthly'],['quarterly','Quarterly'],['yearly','Yearly'],['lifetime','Lifetime'],['custom','Custom']];
   const periodMeta = PERIODS.find(p=>p[0]===period) || PERIODS[0];
-  const periodMult = periodMeta[2];
   const periodLabel = periodMeta[1];
 
+  // Content-analytics tiles — every value is LIVE from /admin/analytics/summary
+  // (sourced from the reports table). `drill` = what tapping the tile opens.
   const METRICS = [
-    { key:'uploaded',  label:'Total Uploaded Videos',  icon:'📤', c:'#3B82F6' },
-    { key:'processed', label:'Processed Videos',        icon:'⚙️', c:'#14B8A6' },
-    { key:'pending',   label:'Pending Videos',          icon:'📋', c:'#F59E0B' },
-    { key:'rejected',  label:'Rejected Videos',         icon:'❌', c:'#EF4444' },
-    { key:'rereview',  label:'Sent for Re-review',      icon:'🔁', c:'#F97316' },
-    { key:'published', label:'Published Videos',        icon:'✅', c:'#10B981' },
+    { key:'total',          label:'Total Uploaded', icon:'📤', c:'#3B82F6', drill:'metric' },
+    { key:'pending',        label:'Pending Review', icon:'📋', c:'#F59E0B', drill:'metric' },
+    { key:'approved',       label:'Approved',       icon:'✅', c:'#10B981', drill:'metric' },
+    { key:'rejected',       label:'Rejected',       icon:'❌', c:'#EF4444', drill:'metric' },
+    { key:'reporters',      label:'Reporters',      icon:'🧑‍💻', c:'#8B5CF6', drill:'reporters' },
+    { key:'constituencies', label:'Constituencies', icon:'📍', c:'#0EA5E9', drill:'conslist' },
   ];
+  const metricValue = (key) => {
+    if (!analytics) return null;
+    if (key === 'reporters')      return analytics.reporters?.active;
+    if (key === 'constituencies') return analytics.constituencies;
+    return analytics.reports?.[key];
+  };
   const STATES = [
     { code:'AP', name:'Andhra Pradesh' }, { code:'TG', name:'Telangana' },
     { code:'KA', name:'Karnataka' },      { code:'TN', name:'Tamil Nadu' },
@@ -617,27 +636,15 @@ function AdminDashboardScreen({ onBack }) {
     TG:['Warangal','Khammam','Nizamabad'],
     KA:['Bengaluru South','Mysuru'], TN:['Chennai Central','Coimbatore'],
   };
-  const baseState = {
-    AP:{uploaded:980,processed:660,pending:210,rejected:74,rereview:33,published:580},
-    TG:{uploaded:520,processed:360,pending:96,rejected:38,rereview:18,published:300},
-    KA:{uploaded:210,processed:140,pending:48,rejected:18,rereview:8, published:128},
-    TN:{uploaded:110,processed:80, pending:32,rejected:12,rereview:5, published:78},
-  };
-  const scale = (n) => Math.max(0, Math.round(n * periodMult));
-  const fmt = (n) => n.toLocaleString('en-IN');
-  const metricTotal = (mk) => scale(STATES.reduce((a,s)=>a+baseState[s.code][mk],0));
+  const fmt = (n) => Number(n||0).toLocaleString('en-IN');
+  // Generic seed helpers — retained ONLY for the Content-Workflow demo module
+  // (seedPending). NOT used by the live analytics dashboard.
   const hash = (s) => { let h=2166136261; for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);} return h>>>0; };
   const pick = (s,arr) => arr[hash(s)%arr.length];
   const between = (s,min,max) => min + (hash(s)%(max-min+1));
-  const consCount = (st,c,mk) => {
-    const list = CONST[st]; const w = list.map(x=>1+(hash(st+x)%5));
-    const sum = w.reduce((a,b)=>a+b,0); const i = list.indexOf(c);
-    return scale(Math.round(baseState[st][mk]*w[i]/sum));
-  };
 
   const RNAMES = ['Ravi Kumar','Lakshmi Devi','Suresh Reddy','Anjali Rao','Venkatesh N',
     'Priya Sharma','Naveen Chowdary','Sunitha M','Kiran Babu','Deepa Reddy'];
-  const REVIEWERS = ['Lakshmi Devi','Ravi Kumar','Karthik N','Priya Senior'];
   const TITLES = [
     'కర్నూలు జిల్లాలో భారీ వర్షాలు — లోతట్టు ప్రాంతాలు జలమయం',
     'శ్రీమతి సరోజమ్మ గారికి 75వ పుట్టినరోజు శుభాకాంక్షలు',
@@ -648,36 +655,7 @@ function AdminDashboardScreen({ onBack }) {
     'పాఠశాల వార్షికోత్సవ వేడుకలు ఘనంగా',
     'జాతీయ రహదారిపై రోడ్డు ప్రమాదం — ట్రాఫిక్ ఆటంకం',
   ];
-  const reportersFor = (st, c) => {
-    const n = 3 + (hash(st+c)%3);
-    return Array.from({length:n}).map((_,i)=>{
-      const k = st+c+i; const appr = between(k+'a',62,93);
-      return {
-        id:'CR-'+(1000+(hash(k)%9000)), name:RNAMES[hash(k)%RNAMES.length],
-        state:st, stateName:(STATES.find(s=>s.code===st)||{}).name, cons:c,
-        uploads:between(k+'u',42,260), approvedPct:appr,
-        rejectedPct:Math.max(3,100-appr-between(k+'p',2,9)),
-        lastActive:pick(k+'la',['2h ago','5h ago','Today 11:20','Yesterday 19:40','1d ago','3h ago']),
-        score:between(k+'s',58,97), warnings:hash(k+'w')%4, points:between(k+'pt',120,2600),
-        mobile:'+91 '+(70000+(hash(k)%29999))+' '+(10000+(hash(k+'2')%89999)),
-        avatar:pick(k+'av',['#3B82F6','#8B5CF6','#10B981','#F59E0B','#D0021B','#0EA5E9']),
-      };
-    });
-  };
-  const videosFor = (rep) => {
-    const n = 6 + (hash(rep.id)%5);
-    return Array.from({length:n}).map((_,i)=>{
-      const k = rep.id+'v'+i;
-      return {
-        id:'VID-'+(80000+(hash(k)%19999)), title:TITLES[hash(k)%TITLES.length],
-        cat:pick(k+'c',['News','Birthday','Event','Rental','Vehicle','Jobs']),
-        uploadedAt:pick(k+'t',['Today 09:42','Today 11:18','Today 14:05','Yesterday 18:30','Today 08:12']),
-        st:statusKeys[hash(k)%statusKeys.length],
-        ai:pick(k+'ai',['Passed','Passed','Flagged','Pending']),
-        reviewer:REVIEWERS[hash(k+'r')%REVIEWERS.length], rep,
-      };
-    });
-  };
+  // (reportersFor / videosFor dummy generators removed — analytics is now live.)
 
   // ── form submissions (Forms CRM hub: leads, complaints, contact, partners) ──
   const FORM_STATUS = {
@@ -890,16 +868,19 @@ function AdminDashboardScreen({ onBack }) {
   );
   const MetricTiles = ({ onPick }) => (
     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>
-      {METRICS.map(m=>(
-        <button key={m.key} onClick={()=>onPick(m.key)} style={{textAlign:'left',cursor:'pointer',
+      {METRICS.map(m=>{
+        const v = metricValue(m.key);
+        return (
+        <button key={m.key} onClick={()=>onPick(m)} style={{textAlign:'left',cursor:'pointer',
           background:T.bg2,border:`1px solid ${T.border}`,borderRadius:12,padding:'12px 12px'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontSize:18}}>{m.icon}</span><span style={{fontSize:14,color:m.c}}>›</span>
           </div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:900,color:m.c,lineHeight:1.1,marginTop:4}}>{fmt(metricTotal(m.key))}</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:900,color:m.c,lineHeight:1.1,marginTop:4}}>{v==null ? (analyticsLoading?'…':'—') : fmt(v)}</div>
           <div style={{fontSize:10.5,color:T.textMuted,fontWeight:700,marginTop:2,lineHeight:1.3}}>{m.label}</div>
         </button>
-      ))}
+        );
+      })}
     </div>
   );
   const Crumb = ({ items }) => (
@@ -924,184 +905,207 @@ function AdminDashboardScreen({ onBack }) {
     </div>
   );
 
-  // ── drill-down screens ──
+  const MiniStat = ({ label, value, c }) => (
+    <div style={{background:T.bg3,borderRadius:8,padding:'7px 4px',textAlign:'center'}}>
+      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:15,fontWeight:900,color:c||T.text,lineHeight:1.1}}>{value}</div>
+      <div style={{fontSize:8.5,color:T.textMuted,fontWeight:700,marginTop:1}}>{label}</div>
+    </div>
+  );
+
+  // ── drill-down screens — ALL data is LIVE from /api/admin/analytics ──
+  // Tiny fetch-on-mount helper. Refetches when `deps` change (e.g. period).
+  const useDrill = (path, deps) => {
+    const [data, setData] = useState(null);
+    const [err, setErr] = useState('');
+    useEffect(() => {
+      let on = true; setData(null); setErr('');
+      adminFetch(path)
+        .then(d => { if (on) setData(d); })
+        .catch(e => { if (on) setErr(e.message || 'Failed to load'); });
+      return () => { on = false; };
+    }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+    return { data, err };
+  };
+  const DrillLoading = () => (
+    <div style={{textAlign:'center',padding:'40px 0',color:T.textMuted,fontSize:13}}>Loading live data…</div>
+  );
+  const DrillError = ({ msg }) => (
+    <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)'}}>
+      <div style={{fontSize:12.5,color:'#EF4444',fontWeight:700,marginBottom:3}}>Couldn’t load data</div>
+      <div style={{fontSize:11.5,color:T.textMuted,lineHeight:1.5,wordBreak:'break-word'}}>{msg}</div>
+    </div>
+  );
+  const DrillEmpty = ({ label }) => (
+    <div style={{textAlign:'center',padding:'34px 16px',color:T.textMuted}}>
+      <div style={{fontSize:30,marginBottom:8}}>📭</div>
+      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:3}}>No {label} in this period</div>
+      <div style={{fontSize:11.5}}>Try a wider period (e.g. Lifetime) from the tabs above.</div>
+    </div>
+  );
+  const statusColor = (st) => STC[st] || (st === 'new' ? '#0EA5E9' : T.textMuted);
+  const fdate = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle:'medium' }) : '—';
+
+  // metric (status) breakdown by constituency → tap a constituency for reporters
   function MetricView({ metric }) {
-    const m = METRICS.find(x=>x.key===metric);
+    const m = METRICS.find(x=>x.key===metric) || METRICS[0];
+    const { data, err } = useDrill(`/admin/analytics/by-constituency?period=${encodeURIComponent(period)}`, [period]);
+    const valOf = (r) => metric==='total' ? r.total : (r[metric] ?? 0);
+    const rows = data ? [...(data.constituencies||[])].sort((a,b)=>valOf(b)-valOf(a)) : null;
+    const grand = metricValue(metric);
     return (
       <div>
         <PeriodBar/>
         <div style={{...cardS,borderColor:m.c+'66',background:m.c+'14'}}>
           <div style={{fontSize:11,color:T.textMuted}}>{m.label} · {periodLabel}</div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:30,fontWeight:900,color:m.c}}>{fmt(metricTotal(metric))}</div>
-          <div style={{fontSize:11,color:T.textMuted}}>Tap a state to drill down →</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:30,fontWeight:900,color:m.c}}>{grand==null?'…':fmt(grand)}</div>
+          <div style={{fontSize:11,color:T.textMuted}}>Tap a constituency to drill down →</div>
         </div>
-        <SecH>State level</SecH>
-        {STATES.map(s=>(
-          <NavRow key={s.code} title={s.name} sub={`${CONST[s.code].length} constituencies`}
-            right={fmt(scale(baseState[s.code][metric]))} rc={m.c}
-            onClick={()=>pushDrill({type:'state',metric,state:s.code})}/>
-        ))}
+        <SecH>Constituency level</SecH>
+        {err ? <DrillError msg={err}/> : !rows ? <DrillLoading/> :
+          rows.length===0 ? <DrillEmpty label="reports"/> :
+          rows.map(r=>(
+            <NavRow key={r.constituency} title={r.constituency}
+              sub={`${fmt(r.reporters)} reporter(s) · ${fmt(r.total)} total`}
+              right={fmt(valOf(r))} rc={m.c}
+              onClick={()=>pushDrill({type:'cons',cons:r.constituency,metric})}/>
+          ))
+        }
       </div>
     );
   }
-  function StateView({ metric, state }) {
-    const m = METRICS.find(x=>x.key===metric); const sName=(STATES.find(s=>s.code===state)||{}).name;
+
+  // constituency performance list — full status breakdown per constituency
+  function ConstituencyListView() {
+    const { data, err } = useDrill(`/admin/analytics/by-constituency?period=${encodeURIComponent(period)}`, [period]);
+    const rows = data ? (data.constituencies||[]) : null;
     return (
       <div>
         <PeriodBar/>
-        <Crumb items={[m.label, sName]}/>
-        <SecH>{sName} · constituency level</SecH>
-        {CONST[state].map(c=>(
-          <NavRow key={c} title={c} sub={`${reportersFor(state,c).length} citizen reporters`}
-            right={fmt(consCount(state,c,metric))} rc={m.c}
-            onClick={()=>pushDrill({type:'cons',metric,state,cons:c})}/>
-        ))}
+        <SecH>Constituency performance · {periodLabel}</SecH>
+        {err ? <DrillError msg={err}/> : !rows ? <DrillLoading/> :
+          rows.length===0 ? <DrillEmpty label="constituencies"/> :
+          rows.map(r=>(
+            <button key={r.constituency} onClick={()=>pushDrill({type:'cons',cons:r.constituency,metric:'total'})}
+              style={{width:'100%',textAlign:'left',cursor:'pointer',...cardS}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:14,fontWeight:800,color:T.text}}>{r.constituency}</div>
+                <span style={{color:T.textMuted,fontSize:16}}>›</span>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:6}}>
+                <MiniStat label="Total"     value={fmt(r.total)}     c="#3B82F6"/>
+                <MiniStat label="Pending"   value={fmt(r.pending)}   c="#F59E0B"/>
+                <MiniStat label="Approved"  value={fmt(r.approved)}  c="#10B981"/>
+                <MiniStat label="Rejected"  value={fmt(r.rejected)}  c="#EF4444"/>
+                <MiniStat label="Reporters" value={fmt(r.reporters)} c="#8B5CF6"/>
+              </div>
+            </button>
+          ))
+        }
       </div>
     );
   }
-  function ConsView({ metric, state, cons }) {
-    const m = METRICS.find(x=>x.key===metric); const reps=reportersFor(state,cons);
+
+  // reporters within a constituency → tap for full reporter profile
+  function ConsView({ cons, metric }) {
+    const { data, err } = useDrill(`/admin/analytics/by-reporter?period=${encodeURIComponent(period)}&constituency=${encodeURIComponent(cons)}`, [period, cons]);
+    const reps = data ? (data.reporters||[]) : null;
     return (
       <div>
         <PeriodBar/>
-        <Crumb items={[m.label,(STATES.find(s=>s.code===state)||{}).name,cons]}/>
-        <SecH>{cons} · citizen reporters</SecH>
-        {reps.map(r=>(
-          <NavRow key={r.id} onClick={()=>pushDrill({type:'reporter',rep:r})}
-            left={<div style={{width:36,height:36,borderRadius:'50%',background:r.avatar,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:15,flexShrink:0}}>{r.name[0]}</div>}
-            title={r.name} sub={`${r.id} · ${scale(r.uploads)} uploads · ${r.approvedPct}% approved`}
-            right={`${r.score}`} rc={'#10B981'}/>
-        ))}
-        <div style={{fontSize:10.5,color:T.textMuted,textAlign:'center',marginTop:2}}>Right value = performance score · tap a reporter for full profile</div>
+        <Crumb items={[(METRICS.find(x=>x.key===metric)||{}).label || 'Reports', cons]}/>
+        <SecH>{cons} · reporters</SecH>
+        {err ? <DrillError msg={err}/> : !reps ? <DrillLoading/> :
+          reps.length===0 ? <DrillEmpty label="reporters"/> :
+          reps.map(r=>(
+            <NavRow key={r.email} onClick={()=>pushDrill({type:'reporter',email:r.email})}
+              left={<div style={{width:36,height:36,borderRadius:'50%',background:r.registered?'#10B981':'#9CA3AF',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:15,flexShrink:0}}>{(r.name||'?')[0].toUpperCase()}</div>}
+              title={r.name}
+              sub={`${fmt(r.total)} uploads · ${fmt(r.approved)} approved · ${fmt(r.rejected)} rejected${r.registered?'':' · guest'}`}
+              right={fmt(r.total)} rc={'#3B82F6'}/>
+          ))
+        }
       </div>
     );
   }
-  function ReporterView({ rep }) {
-    const vids = videosFor(rep);
+
+  // all reporters (period-wide) → tap for full reporter profile
+  function ReporterListView() {
+    const { data, err } = useDrill(`/admin/analytics/by-reporter?period=${encodeURIComponent(period)}`, [period]);
+    const reps = data ? (data.reporters||[]) : null;
+    return (
+      <div>
+        <PeriodBar/>
+        <SecH>Reporters · {periodLabel}</SecH>
+        {err ? <DrillError msg={err}/> : !reps ? <DrillLoading/> :
+          reps.length===0 ? <DrillEmpty label="reporters"/> :
+          reps.map(r=>(
+            <NavRow key={r.email} onClick={()=>pushDrill({type:'reporter',email:r.email})}
+              left={<div style={{width:36,height:36,borderRadius:'50%',background:r.registered?'#10B981':'#9CA3AF',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:15,flexShrink:0}}>{(r.name||'?')[0].toUpperCase()}</div>}
+              title={r.name}
+              sub={`${r.constituency||'—'} · ${fmt(r.total)} uploads · ${fmt(r.approved)} approved`}
+              right={fmt(r.total)} rc={'#3B82F6'}/>
+          ))
+        }
+      </div>
+    );
+  }
+
+  // single reporter — profile + activity buckets + recent uploads
+  function ReporterView({ email }) {
+    const { data, err } = useDrill(`/admin/analytics/reporter?email=${encodeURIComponent(email)}`, [email]);
+    if (err) return <DrillError msg={err}/>;
+    if (!data) return <DrillLoading/>;
+    const rep = data.reporter || {}; const bs = data.byStatus || {}; const act = data.activity || {};
+    const reports = data.reports || [];
     return (
       <div>
         <div style={{...cardS,display:'flex',gap:13,alignItems:'center'}}>
-          <div style={{width:54,height:54,borderRadius:'50%',background:rep.avatar,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:22,flexShrink:0}}>{rep.name[0]}</div>
+          <div style={{width:54,height:54,borderRadius:'50%',background:rep.registered?'#10B981':'#9CA3AF',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:22,flexShrink:0}}>{(rep.name||'?')[0].toUpperCase()}</div>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontWeight:800,fontSize:16,color:T.text}}>{rep.name}</div>
-            <div style={{fontSize:11.5,color:T.textMuted}}>{rep.id} · {rep.mobile}</div>
-            <div style={{fontSize:11.5,color:T.textMuted}}>📍 {rep.cons}, {rep.stateName}</div>
+            <div style={{fontWeight:800,fontSize:16,color:T.text,wordBreak:'break-word'}}>{rep.name}</div>
+            <div style={{fontSize:11.5,color:T.textMuted,wordBreak:'break-word'}}>{rep.email}</div>
+            {rep.mobile && <div style={{fontSize:11.5,color:T.textMuted}}>📞 {rep.mobile}</div>}
+            <div style={{fontSize:11.5,color:T.textMuted}}>📍 {rep.constituency || '—'}</div>
           </div>
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:6}}>
-          <Stat label="Uploaded" value={fmt(rep.uploads)} c="#3B82F6"/>
-          <Stat label="Approval %" value={rep.approvedPct+'%'} c="#10B981"/>
-          <Stat label="Rejection %" value={rep.rejectedPct+'%'} c="#EF4444"/>
-          <Stat label="Perf. score" value={rep.score} c="#8B5CF6"/>
-          <Stat label="Reward pts" value={fmt(rep.points)} c="#F59E0B"/>
-          <Stat label="Warnings" value={rep.warnings} c={rep.warnings?'#EF4444':'#10B981'}/>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:6}}>
+          <Stat label="Total uploads" value={fmt(bs.total)}    c="#3B82F6"/>
+          <Stat label="Pending"       value={fmt(bs.pending)}  c="#F59E0B"/>
+          <Stat label="Approved"      value={fmt(bs.approved)} c="#10B981"/>
+          <Stat label="Rejected"      value={fmt(bs.rejected)} c="#EF4444"/>
         </div>
         <div style={{...cardS,padding:0,overflow:'hidden'}}>
-          <KV k="Last active" v={rep.lastActive}/>
-          <KV k="Constituency assigned" v={`${rep.cons}, ${rep.stateName}`}/>
-          <KV k="Warning history" v={rep.warnings?`${rep.warnings} warning(s) · last: spam flag`:'Clean record'} vc={rep.warnings?'#EF4444':'#10B981'}/>
-          <KV k="Rewards / points" v={`${fmt(rep.points)} pts · ${rep.points>1500?'Gold':'Silver'} tier`} vc="#F59E0B"/>
+          <KV k="Registered reporter" v={rep.registered ? 'Yes' : 'No (guest submitter)'} vc={rep.registered?'#10B981':'#F59E0B'}/>
+          <KV k="Registration date" v={fdate(rep.registeredAt)}/>
+          <KV k="Mobile number" v={rep.mobile || '—'}/>
+          <KV k="Constituency" v={rep.constituency || '—'}/>
+          <KV k="First upload" v={fdate(rep.firstUpload)}/>
+          <KV k="Last upload" v={fdate(rep.lastUpload)}/>
           <div style={{padding:'4px 0'}}/>
         </div>
-        <SecH>All uploaded videos ({vids.length})</SecH>
-        {vids.map(v=>(
-          <button key={v.id} onClick={()=>pushDrill({type:'video',video:v})} style={{width:'100%',textAlign:'left',cursor:'pointer',...cardS,display:'flex',gap:10,alignItems:'flex-start'}}>
-            <div style={{width:46,height:46,borderRadius:8,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>🎬</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,fontWeight:700,color:T.text,lineHeight:1.4,marginBottom:4}}>{v.title}</div>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:6}}>
-                <span style={{fontSize:10.5,color:T.textMuted}}>{v.cat} · {v.uploadedAt}</span>
-                <Chip txt={STATUS[v.st].l} c={STATUS[v.st].c}/>
+        <SecH>Activity</SecH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:6,marginBottom:6}}>
+          <MiniStat label="Today"    value={fmt(act.today)}     c="#3B82F6"/>
+          <MiniStat label="Yest."    value={fmt(act.yesterday)} c="#0EA5E9"/>
+          <MiniStat label="7 days"   value={fmt(act.last7)}     c="#8B5CF6"/>
+          <MiniStat label="30 days"  value={fmt(act.last30)}    c="#6366F1"/>
+          <MiniStat label="Lifetime" value={fmt(act.lifetime)}  c="#10B981"/>
+        </div>
+        <SecH>Recent uploads ({reports.length})</SecH>
+        {reports.length===0 ? <DrillEmpty label="uploads"/> :
+          reports.map(v=>(
+            <div key={v.id} style={{...cardS,display:'flex',gap:10,alignItems:'flex-start'}}>
+              <div style={{width:46,height:46,borderRadius:8,background:T.bg3,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>{v.video_path?'🎬':'📝'}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12.5,fontWeight:700,color:T.text,lineHeight:1.4,marginBottom:4,wordBreak:'break-word'}}>{v.subject || v.message || '(no title)'}</div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:10.5,color:T.textMuted}}>{fdate(v.created_at)}</span>
+                  <Chip txt={(v.status||'').toUpperCase()} c={statusColor(v.status)}/>
+                </div>
               </div>
             </div>
-          </button>
-        ))}
-      </div>
-    );
-  }
-  function VideoView({ video:v }) {
-    const s = STATUS[v.st];
-    const reason = {
-      rejected:'Low video quality / shaky footage — does not meet broadcast standard.',
-      reupload:'Audio not clear. Please re-record with better sound and re-upload.',
-      need_info:'Please confirm the exact location and date of this event.',
-      duplicate:'Matches an already-published video (98% similarity · content_77c…).',
-    }[v.st];
-    const reupMsg = `నమస్తే ${v.rep.name} గారు, మీ వీడియోను మళ్లీ అప్‌లోడ్ చేయండి — స్పష్టమైన ఆడియో అవసరం. (Re-upload requested — clearer audio needed.)`;
-    const finalAction = {
-      approved:'Approved by '+v.reviewer, published:'Approved & aired by '+v.reviewer,
-      rejected:'Rejected by '+v.reviewer, reupload:'Re-upload requested by '+v.reviewer,
-      need_info:'More info requested by '+v.reviewer, escalated:'Escalated to Master Admin',
-      duplicate:'Auto-blocked by dedup', under_review:'Pending decision', processing:'—', ai_pending:'—',
-    }[v.st] || '—';
-    const human = {
-      approved:'Approved', published:'Approved', rejected:'Rejected', reupload:'Returned for re-upload',
-      need_info:'Awaiting info', escalated:'Escalated', under_review:'In progress',
-      processing:'Not started', ai_pending:'Not started', duplicate:'Auto-handled',
-    }[v.st];
-    const publishS = v.st==='published'?'🟢 Live on channel':v.st==='approved'?'Scheduled · next slot':'— not published';
-    const pushS = v.st==='published'?'Sent ✓ (FCM)':v.st==='approved'?'Queued':['rejected','reupload','need_info'].includes(v.st)?'Sent ✓ (status update)':'Not sent';
-    const procS = ['ai_pending'].includes(v.st)?'Queued':v.st==='processing'?'Processing · FFmpeg 2/5':'Completed';
-    const notif = [
-      ['Citizen Reporter', v.rep.name, pushS==='Not sent'?'Pending':'Delivered'],
-      ['Uploader', v.rep.name, pushS==='Not sent'?'Pending':'Delivered'],
-      ['Reviewer', v.reviewer, 'Read'],
-      ['Admin', 'Koneti Mohan Reddy', 'Delivered'],
-    ];
-    return (
-      <div>
-        <Crumb items={[v.rep.stateName, v.rep.cons, v.rep.name, v.id]}/>
-        <div style={{...cardS,padding:0,overflow:'hidden'}}>
-          <div style={{height:150,background:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:40,position:'relative'}}>🎬
-            <span style={{position:'absolute',bottom:8,right:8}}><Chip txt={s.l} c={s.c}/></span>
-          </div>
-          <div style={{padding:'12px 13px'}}>
-            <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:14,fontWeight:700,color:T.text,lineHeight:1.45}}>{v.title}</div>
-            <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>{v.id} · {v.cat} · 👤 {v.rep.name} ({v.rep.id})</div>
-          </div>
-        </div>
-        <SecH>Review workflow</SecH>
-        <div style={{...cardS,padding:0,overflow:'hidden'}}>
-          <KV k="Upload time" v={v.uploadedAt}/>
-          <KV k="Processing status" v={procS} vc={procS==='Completed'?'#10B981':'#3B82F6'}/>
-          <KV k="AI moderation" v={v.ai} vc={v.ai==='Passed'?'#10B981':v.ai==='Flagged'?'#EF4444':'#0EA5E9'}/>
-          <KV k="Human review" v={human} vc={s.c}/>
-          <KV k="Assigned reviewer" v={v.reviewer}/>
-          <KV k="Final action taken" v={finalAction} vc={s.c}/>
-          <KV k="Publish status" v={publishS} vc={v.st==='published'?'#10B981':T.textMuted}/>
-          <KV k="Push notification" v={pushS} vc={pushS.startsWith('Sent')?'#10B981':T.textMuted}/>
-          <div style={{padding:'4px 0'}}/>
-        </div>
-        {reason && (
-          <div style={{...cardS,background:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.35)'}}>
-            <div style={{fontSize:11,fontWeight:800,color:'#EF4444',marginBottom:3}}>Reason for {s.l.toLowerCase()}</div>
-            <div style={{fontSize:12,color:T.text,lineHeight:1.5}}>{reason}</div>
-          </div>
-        )}
-        {v.st==='reupload' && (
-          <div style={{...cardS,background:'rgba(249,115,22,0.08)',borderColor:'rgba(249,115,22,0.35)'}}>
-            <div style={{fontSize:11,fontWeight:800,color:'#F97316',marginBottom:3}}>Re-upload request message</div>
-            <div style={{fontFamily:"'Noto Sans Telugu','Barlow',sans-serif",fontSize:12,color:T.text,lineHeight:1.55}}>{reupMsg}</div>
-          </div>
-        )}
-        <SecH>Actions</SecH>
-        <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:6}}>
-          {['✅ Approve','✏️ Modify+Approve','❌ Reject','🔁 Request Re-upload','ℹ️ Need More Info','↗ Escalate','🚀 Publish'].map(b=>(
-            <span key={b} style={{fontSize:11,fontWeight:700,color:T.text,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,padding:'7px 11px'}}>{b}</span>
-          ))}
-        </div>
-        <SecH>Notifications sent</SecH>
-        <div style={{...cardS,padding:0,overflow:'hidden'}}>
-          {notif.map((n,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',borderTop:i?`1px solid ${T.border}`:'none'}}>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,fontWeight:700,color:T.text}}>{n[0]}</div>
-                <div style={{fontSize:10.5,color:T.textMuted}}>→ {n[1]}</div>
-              </div>
-              <Chip txt={n[2]} c={n[2]==='Pending'?'#F59E0B':n[2]==='Read'?'#3B82F6':'#10B981'}/>
-            </div>
-          ))}
-        </div>
+          ))
+        }
       </div>
     );
   }
@@ -1944,10 +1948,10 @@ function AdminDashboardScreen({ onBack }) {
   function DrillScreen() {
     const f = drill[drill.length-1];
     if (f.type==='metric')        return <MetricView metric={f.metric}/>;
-    if (f.type==='state')         return <StateView metric={f.metric} state={f.state}/>;
-    if (f.type==='cons')          return <ConsView metric={f.metric} state={f.state} cons={f.cons}/>;
-    if (f.type==='reporter')      return <ReporterView rep={f.rep}/>;
-    if (f.type==='video')         return <VideoView video={f.video}/>;
+    if (f.type==='conslist')      return <ConstituencyListView/>;
+    if (f.type==='reporters')     return <ReporterListView/>;
+    if (f.type==='cons')          return <ConsView metric={f.metric} cons={f.cons}/>;
+    if (f.type==='reporter')      return <ReporterView email={f.email}/>;
     if (f.type==='pending')       return <PendingTable/>;
     if (f.type==='pendingreview') return <PendingReviewDetail item={f.item}/>;
     if (f.type==='reportreview')  return <ReportReview report={f.report}/>;
@@ -1959,10 +1963,10 @@ function AdminDashboardScreen({ onBack }) {
   const drillTitle = () => {
     const f = drill[drill.length-1]; if(!f) return '';
     if (f.type==='metric')        return (METRICS.find(x=>x.key===f.metric)||{}).label;
-    if (f.type==='state')         return (STATES.find(s=>s.code===f.state)||{}).name;
+    if (f.type==='conslist')      return 'Constituency Performance';
+    if (f.type==='reporters')     return 'Reporters';
     if (f.type==='cons')          return f.cons;
-    if (f.type==='reporter')      return f.rep.name;
-    if (f.type==='video')         return 'Video Review';
+    if (f.type==='reporter')      return 'Reporter';
     if (f.type==='pending')       return 'Pending Reviews';
     if (f.type==='pendingreview') return 'Review · ' + f.item.id;
     if (f.type==='reportreview')  return 'Report · ' + reportReporter(f.report);
@@ -2876,13 +2880,10 @@ function AdminDashboardScreen({ onBack }) {
           </div>
 
           {can('allIndiaAnalytics') && (<>
-            <SecH>Regional drill-down (illustrative sample)</SecH>
-            <div style={{...cardS,background:T.bg3,fontSize:11,color:T.textMuted,lineHeight:1.6}}>
-              The per-state / per-constituency / per-reporter drill below uses sample
-              data — it activates with real numbers once the regional analytics API is deployed.
-            </div>
+            <SecH>Regional drill-down · constituency · reporter</SecH>
+            {analyticsErr && <DrillError msg={analyticsErr}/>}
             <PeriodBar/>
-            <MetricTiles onPick={(mk)=>pushDrill({type:'metric',metric:mk})}/>
+            <MetricTiles onPick={openMetric}/>
           </>)}
         </div>
       );
@@ -3269,8 +3270,9 @@ function AdminDashboardScreen({ onBack }) {
 
       {can('allIndiaAnalytics') && (<>
         <SecH>Content Analytics · tap a metric to drill down</SecH>
+        {analyticsErr && <DrillError msg={analyticsErr}/>}
         <PeriodBar/>
-        <MetricTiles onPick={(mk)=>pushDrill({type:'metric',metric:mk})}/>
+        <MetricTiles onPick={openMetric}/>
       </>)}
 
       <SecH>Modules</SecH>
